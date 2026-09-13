@@ -1,0 +1,28 @@
+{
+  "all_unchanged": true,
+  "numerical_abstract_syntax_equality": {
+    "tracking.py:translation_ncc": true,
+    "tracking.py:peaks": true,
+    "tracking.py:admissible": true,
+    "tracking.py:best_candidate": true,
+    "tracking.py:ImageOnlyTracker.coarse_task": true,
+    "tracking.py:ImageOnlyTracker.initialize_tracking": true,
+    "tracking.py:ImageOnlyTracker.prior": true,
+    "tracking.py:ImageOnlyTracker.track": true,
+    "tracking.py:ImageOnlyTracker.detect": true,
+    "tracking.py:coarse_view": true,
+    "fit_fields.py:normalize": true,
+    "fit_fields.py:images": true,
+    "ptv_model.py:PTVModel.evaluate": true,
+    "ptv_model.py:PTVModel.gradient": true,
+    "finalize_fields.py:neighborhoods": true,
+    "finalize_fields.py:FastLocalField.evaluate": true,
+    "finalize_fields.py:visible": true,
+    "finalize_fields.py:ConservativeEvaluator.evaluate_conservative": true,
+    "integrate_profile.py:horizontal_samples": true,
+    "integrate_profile.py:sum_supported": true,
+    "integrate_profile.py:sensitivity": true,
+    "integrate_profile.py:integrate_arrays": true,
+    "fit_local_cached.py:whole_file": true
+  }
+}

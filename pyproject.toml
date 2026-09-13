@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quadratic-optical"
+version = "0.1.0"
+description = "Conservative image-only quadratic optical flow near a free surface, with independent PIV and IR comparisons"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.23,<3",
+  "scipy>=1.9,<2",
+  "matplotlib>=3.6,<4",
+  "Pillow>=9.2,<13",
+  "h5py>=3.7,<4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7,<10"]
+
+[project.scripts]
+quadratic-optical = "quadratic_optical.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: complete image-only synthetic pipeline"]

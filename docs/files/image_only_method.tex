@@ -1,0 +1,104 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,hyperref}
+\title{Conservative image-only quadratic optical flow}
+\author{QuadraticOptical: method and comparison conventions}
+\date{}
+\begin{document}
+\maketitle
+
+\section{Inputs and independence from supplied PIV}
+The present recomputation uses the A/B TIFF images to estimate motion. No supplied velocity, displacement, correlation array, manual endpoint, previous fitted field, or previous particle track is used. The historical metadata path reads only four MAT datasets (explicit calibration or sidecars can require fewer): \texttt{compVel/DX}, \texttt{compVel/DT}, and the two \texttt{surfacePIVImg} traces. These supply calibration and geometry, not motion estimates. The numerical values $DX=5.650454946380008\times10^{-5}$ and $DT=0.01$ are interpreted as metres per pixel and seconds; these units were subsequently confirmed by the supplied data-format documentation. For new data they must be confirmed explicitly; the program does not infer physical units from image content.
+
+For the historical pair-80/100 figures, the geometric surface convention is $s=\texttt{surfacePIVImg}-12$ pixels. This is an inferred export convention, not a universal correction. The portable default interprets supplied MATLAB traces as one-based image rows with zero additional offset. The historical convention is an explicit configuration with index base zero and offset $-12$ pixels. The first retained TIFF row was independently checked against the rounded provided trace. Thus approximately the first 12 pixels ($0.678$ mm with the confirmed calibration) below the inferred surface are absent. Masking is enforced independently of the geometric trace. No method in this analysis restores those missing observations.
+
+Only source positions within $0.01/DX$ pixels of the local frame-A surface are reported. Fitting uses a 64-pixel deeper halo and detection a further 25-pixel halo. The reporting grid spacing is 8 pixels; it is not an independent spatial-resolution claim.
+
+\section{Image-only initialization and particle tracking}
+Masked local normalization smooths at $0.65$ pixels, removes a Gaussian local mean at 7 pixels and divides by a local root-mean-square contrast at 9 pixels, with variance floor 25. Values are clipped to $[-3,4]$.
+
+Each coarse patch undergoes a normalized cross-correlation (NCC) translation search over $[-64,64]^2$ pixels. Only jointly valid source/target pixels contribute; at least $\max(40,0.65N_A)$ common pixels are required, where $N_A$ is the available source count. Image edges clip the search. Three separated peaks and the zero displacement are independently refined with a radius-19 affine image registration. The highest finite-NCC admissible fit supplies the coarse map. A $\pm48$-pixel subset supplies a separate bootstrap diagnostic, using cached fits for identical seeds.
+
+Particle candidates are local maxima, over $5\times5$ neighborhoods, of a difference of Gaussian filters with standard deviations $0.6$ and 2 pixels. The peak response must exceed 8 intensity units; the Gaussian-5-pixel background must remain below 180. Candidates require source depth at least 14 pixels and an available $9\times9$ patch.
+
+The local prior is formed from nearby usable, freshly image-derived coarse maps (NCC $>0.7$), with a weighted-medoid displacement consensus. Each particle patch searches $\pm8$ pixels around this prior. Subpixel refinement minimizes
+\[
+  1-\operatorname{NCC}(\mathbf d)+0.005\|\mathbf d-\mathbf d_{\rm prior}\|^2.
+\]
+Both directions must have NCC $>0.68$, reciprocal error below 1 pixel, and forward/reverse match-uniqueness gaps greater than $0.015$ and $0.01$, respectively. At least 85\% of the patch pixels must remain jointly valid. The motion prior is derived entirely from the image pair.
+
+\section{Quadratic image registration}
+Accepted automatic tracks initialize a robust local quadratic regression. Its translation and linear terms initialize the final image fits; no supplied field enters that regression. With patch centre $\mathbf c$, radius $r$, and normalized offset $\boldsymbol\xi=(\mathbf x-\mathbf c)/r$, define
+\[
+ \mathbf b(\boldsymbol\xi)=
+ (1,\xi_x,\xi_y,\tfrac12\xi_x^2,\xi_x\xi_y,\tfrac12\xi_y^2)^T,
+ \qquad \mathbf d(\mathbf x)=P\mathbf b(\boldsymbol\xi).
+\]
+The $2\times6$ coefficient matrix permits translation, rotation, shear, stretch and second-order variation of displacement across the patch. These are patch deformation parameters, not separately identified rotations of individual particles.
+
+The primary radius is 13 pixels. The robust masked image objective is
+\[
+ E(P,a,b)=\sum_i \omega_i v_i\rho_{0.8}
+ \bigl(aB(\mathbf x_i+\mathbf d(\mathbf x_i))+b-A(\mathbf x_i)\bigr)
+ +\frac12\sum_{j,k}\lambda_k P_{jk}^2,
+\]
+where $\omega_i=\exp(-\|\boldsymbol\xi_i\|^2/(2\cdot0.65^2))$, $v_i$ is common validity, and
+\[
+ \rho_\delta(e)=\delta^2\left(\sqrt{1+(e/\delta)^2}-1\right).
+\]
+Gain and offset are updated by weighted least squares, with gain constrained to $[0.3,3]$. Translation has no regularization; linear terms use $5\times10^{-5}\sum\omega_i$, and quadratic terms use four times that amount. Bilinear image interpolation, damped Gauss--Newton steps, and a short line search are used. Steps are limited to 2.5 pixels of maximum patch motion, with at most 35 iterations and a 0.007 coefficient-step stopping tolerance. A trial step must preserve at least 95\% of the current valid pixel count.
+
+Fresh alternatives use affine radius 13, quadratic radius 19 and quadratic radius 13 with a tighter 14-pixel surface margin. Reverse quadratic registration is initialized by the negative forward translation and inverse centre Jacobian. The alternatives assess model sensitivity; they are not independent experiments or calibrated uncertainty bounds.
+
+\section{Blending, derivatives and conservative reporting}
+Local displacement maps are blended with the compact kernel
+\[
+ W(t)=(1-t)^4(1+4t),\quad 0\le t\le1,\qquad
+ \widehat{\mathbf d}(\mathbf x)=
+ \frac{\sum_k W(\|\mathbf x-\mathbf c_k\|/16)\mathbf d_k(\mathbf x)}
+ {\sum_k W(\|\mathbf x-\mathbf c_k\|/16)}.
+\]
+The analytic derivative includes derivatives of both the local maps and the blending weights. Differentiating only a patch's linear coefficients would not be the derivative of this blended field.
+
+The vector screen requires visible source and target pixels, source depth at least 12 pixels, target depth at least 10 pixels, inclusion in the accepted-track convex hull, an accepted track within 12 pixels, and at least six accepted tracks within 25 pixels. It also requires the weighted blend of local patch NCC diagnostics to be at least $0.6$, forward/reverse composition error at most 1 pixel, disagreement with all three alternatives at most 1.5 pixels, and deformation determinant greater than $0.2$. In each direction at least 95\% of the blend weight must come from local maps with determinant above $0.05$ and Gaussian-weighted valid support above $0.85$.
+
+Each diagonal derivative additionally requires depth at least 20 pixels, an accepted track within 10 pixels, and alternative-model component spread at most $0.08$ pixel/pixel. No incompressibility constraint is imposed. Reflections are not individually classified: masks, background tests, reciprocal tracking and consistency screens may reject them, but a consistent reflection can survive.
+
+For image axes $x$ right and $y$ down, let $G_{ij}=\partial\widehat d_i/\partial x_j$. With physical $z$ upward,
+\[
+ u=\frac{DX}{DT}\widehat d_x,\qquad
+ w=-\frac{DX}{DT}\widehat d_y,\qquad
+ \frac{\partial u}{\partial x}=\frac{G_{00}}{DT},\qquad
+ \frac{\partial w}{\partial z}=\frac{G_{11}}{DT}.
+\]
+The vertical signs cancel in the last expression. These are finite-time velocity-gradient estimates with respect to the initial position. A surface-relative display does not redefine these Cartesian derivatives. Quiver arrows retain Cartesian directions.
+
+\section{Horizontal integral at local depth}
+For vertical depth $h$ below the local frame-A surface, sample
+\[
+ \mathbf q(x,h)=\left(x,s_A(x)+\frac h{DX}\right),\qquad
+ Q(h)=DX\int u(\mathbf q(x,h))\,dx.
+\]
+The measure is horizontal distance, without an arc-length factor. The target width is the full pixel-edge interval $[-0.5,W-0.5]$, where $W$ is the image width (2048 pixels in these examples). Two-pixel Simpson intervals contribute only when both endpoints and their midpoint pass the original vector screen. The primary output is the integral over the accepted segments, together with their total width, width fraction and mean velocity. Missing segments are not connected, filled or assigned zero. The strict full-width integral is undefined whenever any target interval is unsupported.
+
+An additional profile uses one fixed horizontal domain: the intersection of supported intervals at every sampled depth from $20DX$ to 1 cm. This domain can be disconnected. The full 0--1 cm range has no common observed domain because of the masked shallow strip. Depth sampling is 0.1 mm with $20DX$ explicitly added. All alternative-model integrals use the same primary segments. Their envelope is model sensitivity, not a confidence interval. A nested 4-pixel/2-pixel Simpson check uses identical supported unions to isolate quadrature sensitivity.
+
+\section{Verification and interpretation}
+Synthetic signed-translation checks, direct NCC comparisons, analytic/finite-difference derivative checks, fresh-image and metadata audits, scalar field reconstruction, and independent quadrature bookkeeping test implementation consistency. They do not establish experimental ground-truth accuracy. The current estimator uses no neural-network model and no supplied velocity for fitting or tuning. Supplied PIV and IR velocities are subsequently used for comparison; they are not assumed to be exact ground truth. Missing surface pixels, uncertain surface position, optical reflections and shared image ambiguities remain limits of the estimates.
+
+\section{Held-out PIV and IR comparisons}
+Prediction completes before supplied PIV displacement arrays are read. PIV may supply calibration and surface geometry during preparation, but its velocity values, correlation flags and comparison masks cannot initialize or screen optical-flow predictions. Comparisons read the frozen fields and verify that their files remain unchanged.
+
+The current default PIV comparison requires a finite saved correlation value, finite vector, any supplied valid-water mask, and actual source-image availability. It does not invent a numerical correlation cutoff. A separate explicit \texttt{finite} mode compares saved finite vectors without requiring a finite correlation. The historical website figures use this latter convention; the PIV data documentation establishing the rejection meaning of missing correlations arrived after those figures were produced.
+
+PIV coordinates and vertical displacement signs are converted from the documented native format. Interpolation requires all positive-weight contributors to be valid and never extrapolates across a gap. Main gradient comparisons use the saved analytic optical-flow derivative and a 16-pixel central-difference PIV derivative, with valid intermediate native nodes. They retain their different smoothing; a separate export compares matched 16-pixel operators where saved optical-flow neighbours exist.
+
+At each local depth, both methods are integrated on exactly the same accepted horizontal intervals. The mean is that integral divided by the shared width. That width may change with depth. An optional fixed common domain intersects the valid intervals across all sampled depths of the chosen band. It is empty for both supplied pair-80/100 examples, so fixed-domain integrals and means are undefined, not zero. Available per-depth comparisons remain valid for their reported changing support.
+
+IR records use the stored PIV-to-IR index. Named campaign entries are checked against the requested experiment; a standalone run without an experiment-name field is recorded as unverified. The extractor prefers a finite fresh-dot \texttt{USurf.usurf0} measurement; otherwise it uses a finite \texttt{USurf.usurffilt} value and labels it as smoothed. It does not substitute a theoretical surface estimate. At the supplied pair-80 and pair-100 times the fresh-dot values are absent; the smoothed references are 0.0986720499554 and 0.134860022336 m/s. The 40-sample smoothing window spans approximately 0.93 s. These scalar references are stars at zero depth on the mean-velocity plot, not boundary conditions or measurements of the full subsurface horizontal mean. Raw IR image paths remain user-specific and unspecified.
+
+\section{Portable execution and reproducibility}
+Python commands discover named A/B pairs, process directories, compare frozen predictions and generate a synthetic example. Rectangular pairs are processed independently. Reports default to the top centimetre with a deeper fitting halo; the requested depth must reach 20 pixels. Configure metres per pixel, A/B delay in seconds, surface coordinates, image availability and any conversion to the 8-bit intensity scale.
+
+Input and code hashes guard checkpoints against changed scientific settings. Tests cover signed motion, second-order deformation, derivatives, missing support, MATLAB conventions and comparison independence. Across 10,515 archived experimental queries, all acceptance flags were preserved; the maximum displacement difference was $7.11\times10^{-15}$ pixels. This verifies the software port, not experimental accuracy.
+\end{document}

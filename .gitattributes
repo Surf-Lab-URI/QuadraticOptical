@@ -1,0 +1,7 @@
+# Preserve scientific figure bytes and avoid enormous generated SVG diffs.
+docs/assets/* binary
+*.mat binary
+*.pdf binary
+*.csv text eol=lf
+# Historical scripts are archived verbatim apart from workstation-root removal.
+research/archive/** -whitespace

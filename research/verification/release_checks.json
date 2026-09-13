@@ -1,0 +1,20 @@
+{
+  "local_tests": {
+    "passed": 72,
+    "python": "3.12.14",
+    "numpy": "2.5.3",
+    "scipy": "1.18.1"
+  },
+  "website": {
+    "tested_viewport_widths_px": [
+      1280,
+      390
+    ],
+    "figure_selector_buttons_checked": 6,
+    "copy_commands_checked": true,
+    "mobile_document_overflow_px": 0,
+    "local_links_checked": true
+  },
+  "data": "No raw experimental TIFFs or campaign MAT file are bundled. Figure/data downloads preserve prior comparison results.",
+  "method_pdf": "Updated explainer with editable LaTeX source."
+}

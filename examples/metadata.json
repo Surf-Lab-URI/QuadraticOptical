@@ -1,0 +1,16 @@
+{
+  "dx_m_per_px": null,
+  "dt_s": null,
+  "depth_m": 0.01,
+  "grid_spacing_px": 8,
+  "grid_phase_px": 7,
+  "surface": {"mode": "piv_mat", "index_base": 1, "offset_px": 0.0},
+  "availability": "full",
+  "intensity_scale": 1.0,
+  "intensity_offset": 0.0,
+  "workers": 1,
+  "integration_interval_px": 2.0,
+  "depth_step_m": 0.0001,
+  "piv_quality": "correlation",
+  "pairs": {}
+}

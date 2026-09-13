@@ -1,0 +1,8 @@
+{
+  "dx_m_per_px": 0.00005,
+  "dt_s": 0.01,
+  "depth_m": 0.01,
+  "surface": {"mode": "sidecar", "index_base": 0, "offset_px": 0.0},
+  "availability": "full",
+  "piv_quality": "correlation"
+}

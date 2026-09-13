@@ -1,0 +1,152 @@
+[
+  {
+    "file": "assets/du_dx_vs_piv.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "66ab45537c80252af70fe04525ab321074471e60b81c3a23f947aac4c9be43cd"
+  },
+  {
+    "file": "assets/du_dx_vs_piv.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "416649838907bae62d2c09f0bac52c2faf2293743e70de74b74b223bb3c16f4f"
+  },
+  {
+    "file": "assets/dw_dz_vs_piv.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "acbe51c498acae86d1b5a3e59695505f952c055b4d4b1607602f35a7559ea2ab"
+  },
+  {
+    "file": "assets/dw_dz_vs_piv.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "d489a8c90ca81ffd3b0e8cce875c5ccc09cb587abe77506e3c7efc9f048edd27"
+  },
+  {
+    "file": "assets/horizontal_integral_vs_piv.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "0553b838b2378224825e5bedc8a0d37a0c6c9ec92d04ae6453ee0c4d7c4052d8"
+  },
+  {
+    "file": "assets/horizontal_integral_vs_piv.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "381331ab36956fd064602b056579cd73cb2c025a101e053692f6a4efd5acd0f8"
+  },
+  {
+    "file": "assets/horizontal_segments_used.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "6c235dbf25151f6b33cd69a51f3ea553e02fa7dbfc7d00e9129f721927fd8bfc"
+  },
+  {
+    "file": "assets/horizontal_segments_used.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "eaeef77225f7ceb0259d540f104157e72c7e8b12f26fd1a0eb64ec06ee1a1fdf"
+  },
+  {
+    "file": "assets/original_profiles_and_piv_own_coverage.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "1211c683aec7110099dcb1c65166370a9b7b6148eeded91f224f53c0169f09ff"
+  },
+  {
+    "file": "assets/original_profiles_and_piv_own_coverage.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "533f21aeeaa3d37704b2a1e803e59a7bb96d9aa0e1023c2a84f95236f9ae341a"
+  },
+  {
+    "file": "assets/quiver_overlay.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "2a5b032d7149ff2b6708169e05f50d2e3c77fa1de45a63a270ab8683269ca7b7"
+  },
+  {
+    "file": "assets/quiver_overlay.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "3bd9668561f1f510a4e4cea086fec365a9b62e0b377fd63dec6d1814f59522db"
+  },
+  {
+    "file": "assets/quiver_overlay_deeper_half.png",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "21a966db47fa90ce0fbcbcaefe1bfa901cc90d249d1b66556d486b312c573c6d"
+  },
+  {
+    "file": "assets/quiver_overlay_deeper_half.svg",
+    "source_collection": "piv_comparison_top_cm",
+    "sha256": "3d1a2e56cb6f23acefb12c726bad84aeed9e6328360f9db2305392abed0b5a6f"
+  },
+  {
+    "file": "assets/horizontal_integral_vs_piv_with_surface.png",
+    "source_collection": "surface_velocity_comparison",
+    "sha256": "28c6a61d750f63c71e18b1f5b284ebe8abb5d303a41ad98d72fa3e8b7a05526d"
+  },
+  {
+    "file": "assets/horizontal_integral_vs_piv_with_surface.svg",
+    "source_collection": "surface_velocity_comparison",
+    "sha256": "3e90bed7302a61f5200257ca74bfe6e935f8aa73e15e2b2451153682ad66db66"
+  },
+  {
+    "file": "assets/mean_horizontal_velocity_with_surface.png",
+    "source_collection": "surface_velocity_comparison",
+    "sha256": "b80d568f3c73bef9300233bdaa8e02d113aa1728f11b54789a17119deb3ba6da"
+  },
+  {
+    "file": "assets/mean_horizontal_velocity_with_surface.svg",
+    "source_collection": "surface_velocity_comparison",
+    "sha256": "aadd5cd3ea80690e05ffae85d6f0e4d7df4a871c50f73a2a2bc0fa7dbcfb6fdc"
+  },
+  {
+    "file": "assets/mean_own_coverage_with_surface.png",
+    "source_collection": "surface_velocity_comparison",
+    "sha256": "18bbd366c54c35fd07164a2e830620502e9b2ab7146e67c6d812c36eec48c94f"
+  },
+  {
+    "file": "assets/mean_own_coverage_with_surface.svg",
+    "source_collection": "surface_velocity_comparison",
+    "sha256": "5e5579628505ba22b92bdff0c6e5dbb0c742a39bffae0be62551eb60cdf2e812"
+  },
+  {
+    "file": "assets/du_dx.png",
+    "source_collection": "image_only_top_cm",
+    "sha256": "d8f36f3c4ea9ce2e8fb4ef465dacfad72addc03729e265039ec648c9b364d8f5"
+  },
+  {
+    "file": "assets/du_dx.svg",
+    "source_collection": "image_only_top_cm",
+    "sha256": "39ca7b90aab815e777c055c82698bf315bdec1f0a7340615dfcf91325ad2e544"
+  },
+  {
+    "file": "assets/dw_dz.png",
+    "source_collection": "image_only_top_cm",
+    "sha256": "90f19d0bbf494efc41f12392337c379d8510755ec49c504b5ba2ffd71c103118"
+  },
+  {
+    "file": "assets/dw_dz.svg",
+    "source_collection": "image_only_top_cm",
+    "sha256": "e8d6081d18c63e669a75347a24377ccd2a20652df05e633099fe881fae360d9f"
+  },
+  {
+    "file": "assets/horizontal_integral_comparison.png",
+    "source_collection": "image_only_top_cm",
+    "sha256": "b47367824d635d5f32374b1f39ca0eec7094b6463a1149a8ead2e95b8f8a8390"
+  },
+  {
+    "file": "assets/horizontal_integral_comparison.svg",
+    "source_collection": "image_only_top_cm",
+    "sha256": "6aea8a567caf99d375c9cbd3e1906297e30dbfb7ac9df182d42af5ee799defec"
+  },
+  {
+    "file": "assets/quiver_comparison.png",
+    "source_collection": "image_only_top_cm",
+    "sha256": "a94f29ec6f9561dc23d86bd5f8d204ae755cbc060f2384e8e2a3491bffdb4fe5"
+  },
+  {
+    "file": "assets/quiver_comparison.svg",
+    "source_collection": "image_only_top_cm",
+    "sha256": "6522ba908e990a24d38c9d8226bc5d406885f10fe326456656169cebe130274b"
+  },
+  {
+    "file": "assets/quiver_deeper_half.png",
+    "source_collection": "image_only_top_cm",
+    "sha256": "907b6d9c32ba3c943df7313d092a75f47d1993fe9e81aa58e2525803cf733c4e"
+  },
+  {
+    "file": "assets/quiver_deeper_half.svg",
+    "source_collection": "image_only_top_cm",
+    "sha256": "66ab893c2638fe900efb410540b0cdf68c2420552548addb57bd5eb80a7c80ee"
+  }
+]
