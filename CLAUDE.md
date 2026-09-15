@@ -121,6 +121,63 @@ analytic gradient, which is stricter (depth >= 20 px, a track within 10 px,
 cross-variant agreement <= 0.08) and remains in `velocity_gradients.csv`. Do not
 quote numbers off the panel where the screened array says NaN.
 
+## Raw-frame workflow (`extract`)
+
+`quadratic-optical extract` builds a standard pair directory from the raw 12-bit
+frames (`<run>/PIVRaw/PIV/<exp>_Piv_NNN_a|b.mat`, variable `imgPiv`) plus the
+originally detected surface (`Surfs.surfsPIV` in the campaign results file). It
+writes `NAME_imgA/B.tif`, a `NAME_surface.npz` sidecar, a ready `config.json` and
+an `extract_manifest.json` recording every source hash and which campaign leaves
+were read.
+
+It is a separate step rather than an image reader inside `prepare` because the
+raw frames sit beside a results file full of supplied velocities, and this
+package's central promise is that prediction never reads those. An exported TIFF
+is unambiguously an image, so the boundary stays checkable.
+
+Facts established from the data, worth not rediscovering:
+
+- The pre-masked TIFFs are `clip(raw, 0, 255)` exactly, so they discard both the
+  surface band and about 1.8-2.2% of pixels at the 255 ceiling. Those clipped
+  pixels are the particle cores, raw values to 4095.
+- `surfacePIVImg = surfsPIV + 10`; `surfsPIV` is the originally detected surface.
+  With the sidecar route the surface IS that detection, `offset_px` is 0, and the
+  historical -10/-12 ambiguity does not arise.
+- Surface row `2n` is frame a of pair n, `2n+1` is frame b, checked against the
+  stored pair labels rather than assumed.
+- The `ts` stamp in each raw frame is a camera clock, NOT the A-to-B delay: frames
+  a and b differ by ~0.068 s, not 0.01. `compVel.DT` and `Surfs.t` both give 0.01 s.
+- `compVel.DX` is metres per IMAGE pixel (2048 px = 11.572 cm), even though the
+  campaign README calls it the velocity-grid cell size; the PIV grid is 4x coarser,
+  so reading it that way gives velocities four times too large.
+
+`--clip` sets the retained ceiling: 255 reproduces the pre-masked TIFF intensities
+exactly, so a first run isolates the effect of the mask alone; higher values keep
+more of the 12-bit range and write 16-bit TIFFs, with `intensity_scale` in the
+emitted config set to match.
+
+## Surface exclusion and the contrast floor
+
+`surface_exclusion_px` (default 10) replaces the hard-coded near-surface mask.
+The margin alternatives shift with it, so `margin14` stays four pixels deeper than
+the primary whatever the base is. Note there are **three** separate near-surface
+constants: this mask, the `depth >= 12` grid and acceptance floor
+(`prepare.py`, `finalize_fields.py`), and the detector's 14. Lowering only the
+exclusion changes which pixels feed each fit but does **not** extend reported
+coverage nearer the surface; the 12 gates that and is still hard-coded.
+
+`normalize()` takes a `floor`, and `prepare.contrast_floor(scale)` returns
+`25 * scale**2`. The bare 25 is a variance in 0-255 units and only means a
+five-count standard deviation when one converted unit is one 8-bit count. Scaling
+it makes the operator invariant under a linear rescale of intensity. Without it a
+12-bit frame mapped into 0-255 has its contrast divided by sixteen against a fixed
+floor: measured median local contrast falls from 22.8 (4.6x the floor) to 3.7
+(0.73x), the normalization goes flat, and nothing raises an error.
+
+**`normalize` exists twice**, in `prepare.py` and `fit_fields.py`. They are
+functionally identical but NOT textually identical. Change both or the margin
+alternatives silently stop being the same model family.
+
 ## Traps
 
 These cost hours if discovered by debugging rather than by being told.

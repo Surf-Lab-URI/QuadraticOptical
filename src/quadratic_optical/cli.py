@@ -238,6 +238,20 @@ def parser():
     c = sub.add_parser('compare', help='Compare an existing frozen prediction without refitting.')
     c.add_argument('directory');c.add_argument('--piv', required=True);c.add_argument('--quality', '--piv-quality', choices=['correlation','finite'], default='correlation')
     c.add_argument('--ir-results');c.add_argument('--experiment');c.add_argument('--pair-number', type=int)
+    e = sub.add_parser('extract', help='Export raw PIV frames and campaign surfaces into a readable pair directory.')
+    e.add_argument('--run-dir', required=True, help='experiment run directory containing PIVRaw/PIV')
+    e.add_argument('--results', required=True, help='campaign results file holding Surfs.surfsPIV')
+    e.add_argument('--output', required=True)
+    e.add_argument('--experiment', help='defaults to the single experiment named by the raw frames')
+    e.add_argument('--pair', action='append', type=int, help='pair number; repeat to select several')
+    e.add_argument('--first', type=int);e.add_argument('--last', type=int)
+    e.add_argument('--clip', type=float, default=255.,
+                   help='retained intensity ceiling; 255 reproduces the pre-masked TIFF intensities, '
+                        'higher keeps more of the 12-bit range (default 255)')
+    e.add_argument('--depth-m', type=float, default=.02)
+    e.add_argument('--surface-exclusion-px', type=float, default=10.)
+    e.add_argument('--dx-m-per-px', type=float);e.add_argument('--dt-s', type=float)
+    e.add_argument('--overwrite', action='store_true')
     m = sub.add_parser('demo', help='Generate and process a small synthetic particle pair.')
     m.add_argument('--output', required=True);m.add_argument('--generate-only', action='store_true');m.add_argument('--workers', type=int, default=1)
     return p
@@ -258,6 +272,20 @@ def main(argv=None):
             return 0
         if args.command == 'run':return run_batch(args)
         if args.command == 'compare':return compare_existing(args)
+        if args.command == 'extract':
+            from .extract import extract, discover_raw
+            pairs = args.pair
+            if args.first is not None or args.last is not None:
+                available, _, _ = discover_raw(args.run_dir, args.experiment)
+                low = args.first if args.first is not None else min(available)
+                high = args.last if args.last is not None else max(available)
+                pairs = sorted(set(pairs or []) | {n for n in available if low <= n <= high})
+            manifest = extract(args.run_dir, args.results, args.output, args.experiment, pairs,
+                               args.clip, args.depth_m, args.surface_exclusion_px,
+                               args.dx_m_per_px, args.dt_s, args.overwrite)
+            print('\nWrote %d pairs to %s' % (len(manifest['pairs_written']), args.output), flush=True)
+            print('Config written to %s' % (Path(args.output)/'config.json'), flush=True)
+            return 0
         if args.command == 'demo':
             directory, inputs = make_demo(args.output)
             command = ['run', str(inputs), '--output', str(directory/'results'), '--config', str(directory/'demo.json'), '--workers', str(args.workers)]

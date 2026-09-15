@@ -12,11 +12,31 @@ def sha(path):
         for block in iter(lambda:f.read(1048576),b''):h.update(block)
     return h.hexdigest()
 
-def normalize(raw,valid):
+CONTRAST_FLOOR=25.
+
+
+def contrast_floor(intensity_scale):
+    """Variance floor matched to the intensity conversion.
+
+    The bare 25 is a variance in 0-255 units, a standard-deviation floor of five
+    brightness levels, and it only means that when one converted unit is one
+    8-bit count. Scaling it by the conversion makes normalize invariant under a
+    linear rescale of intensity: high scales with the conversion, high squared
+    with its square, and the floor with its square, so high/rms is unchanged.
+    Without this a 12-bit image mapped into 0-255 has its real contrast divided
+    by about sixteen while the floor stays fixed, and the normalization goes
+    flat with nothing raising an error.
+    """
+    scale=float(intensity_scale)
+    if not np.isfinite(scale) or scale<=0:raise ValueError('intensity_scale must be finite and positive.')
+    return CONTRAST_FLOOR*scale*scale
+
+
+def normalize(raw,valid,floor=CONTRAST_FLOOR):
     v=valid.astype(float)
     sm=gaussian_filter(raw*v,.65)/np.maximum(gaussian_filter(v,.65),1e-5)
     high=sm-gaussian_filter(sm*v,7)/np.maximum(gaussian_filter(v,7),1e-5)
-    rms=np.sqrt(gaussian_filter(high*high*v,9)/np.maximum(gaussian_filter(v,9),1e-5)+25)
+    rms=np.sqrt(gaussian_filter(high*high*v,9)/np.maximum(gaussian_filter(v,9),1e-5)+floor)
     return np.clip(high/rms,-3,4)
 
 def first_nonzero(a):
@@ -87,6 +107,7 @@ def prepare(pair,directory,config):
         else:raise ValueError('Unsupported surface mode: '+mode)
     arrays={}
     yy=np.arange(height)[:,None]
+    exclusion=float(config['surface_exclusion_px']);floor=contrast_floor(config['intensity_scale'])
     for fr in 'AB':
         s=surf[fr]-base+offset
         if s.shape!=(width,) or not np.isfinite(s).all():raise ValueError('Each surface must contain one finite row coordinate per image column.')
@@ -94,8 +115,8 @@ def prepare(pair,directory,config):
         avail=masks.get(fr,np.ones((height,width),bool))
         if avail.shape!=(height,width):raise ValueError('Availability mask must match image dimensions.')
         if config['availability']=='nonzero_boundary':avail=avail&(yy>=boundaries[fr][None,:])
-        valid=avail&(yy>=s[None,:]+10)
-        arrays.update({fr:normalize(images[fr],valid),'raw'+fr:images[fr],
+        valid=avail&(yy>=s[None,:]+exclusion)
+        arrays.update({fr:normalize(images[fr],valid,floor),'raw'+fr:images[fr],
             'availability_'+fr.lower():avail,'v'+fr.lower():valid,'surface_'+fr.lower():s})
     phase=int(config['grid_phase_px']);spacing=int(config['grid_spacing_px'])
     xx,yy=np.meshgrid(np.arange(phase,width,spacing,dtype=float),np.arange(phase,height,spacing,dtype=float))
@@ -109,6 +130,7 @@ def prepare(pair,directory,config):
         requested_max_depth_px=np.array(requested),fitting_max_depth_px=np.array(fitting),detector_max_depth_px=np.array(detector),
         image_only=np.array(True),supplied_velocity_used=np.array(False),physical_units_confirmed=np.array(True),
         surface_geometry_inferred=np.array(mode=='nonzero_boundary' or offset!=0),surface_trace_offset_px=np.array(offset),
+        surface_exclusion_px=np.array(exclusion),contrast_floor=np.array(floor),intensity_scale=np.array(float(config['intensity_scale'])),
         pair_number=np.array(pair.pair_number if pair.pair_number is not None else -1))
     plan={'schema':1,'pair_name':pair.name,'experiment':pair.experiment,'pair_number':pair.pair_number,
         'image_records':records,'config':config,'surface_mode_resolved':mode,

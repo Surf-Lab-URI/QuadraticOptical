@@ -24,6 +24,7 @@ from ._provenance import forbidden_input_keys, source_hashes, FITTING_SOURCES
 SOLVER_PATH = Path(__file__).resolve().with_name('fit_local_cached.py')
 
 SCHEMA_VERSION = 1
+DEFAULT_EXCLUSION = 10.
 STATS = ['ncc', 'rms', 'nvalid', 'cond', 'iterations', 'mindet', 'support_fraction']
 VARIANTS = {
     'main': (13, 2, 10),
@@ -131,24 +132,47 @@ def inputs_from(path):
     return out
 
 
-def normalize(raw, valid):
-    """The same masked normalization as the original conservative estimator."""
+CONTRAST_FLOOR = 25.
+
+
+def normalize(raw, valid, floor=CONTRAST_FLOOR):
+    """The same masked normalization as the original conservative estimator.
+
+    The floor must match prepare.normalize's. It is a variance in 0-255 units,
+    so a run whose intensity conversion is not one count per unit has to scale
+    it; see prepare.contrast_floor. Leaving one of the two operators behind
+    would stop the margin alternatives being the same model family as the
+    primary, and nothing would report that.
+    """
     v = valid.astype(float)
     smooth = gaussian_filter(raw*v, .65) / np.maximum(gaussian_filter(v, .65), 1e-5)
     mean = gaussian_filter(smooth*v, 7) / np.maximum(gaussian_filter(v, 7), 1e-5)
     high = smooth-mean
     rms = np.sqrt(gaussian_filter(high*high*v, 9) /
-                  np.maximum(gaussian_filter(v, 9), 1e-5) + 25)
+                  np.maximum(gaussian_filter(v, 9), 1e-5) + floor)
     return np.clip(high/rms, -3, 4)
 
 
+def base_margin(inputs):
+    """Surface exclusion this run was prepared with; older inputs used ten."""
+    value = inputs.get('surface_exclusion_px')
+    return 10. if value is None else float(np.asarray(value).ravel()[0])
+
+
+def base_floor(inputs):
+    """Contrast floor matched to this run's intensity conversion."""
+    value = inputs.get('contrast_floor')
+    return CONTRAST_FLOOR if value is None else float(np.asarray(value).ravel()[0])
+
+
 def images(inputs, margin):
-    if margin == 10:
+    if margin == base_margin(inputs):
         return tuple(inputs[k] for k in ['A', 'B', 'va', 'vb'])
+    floor = base_floor(inputs)
     y = np.arange(inputs['A'].shape[0])[:, None]
     va = inputs['availability_a'] & (y >= inputs['surface_a'][None, :] + margin)
     vb = inputs['availability_b'] & (y >= inputs['surface_b'][None, :] + margin)
-    return normalize(inputs['rawA'], va), normalize(inputs['rawB'], vb), va, vb
+    return normalize(inputs['rawA'], va, floor), normalize(inputs['rawB'], vb, floor), va, vb
 
 
 def verify_saved(data, run_signature, points, stage):
@@ -232,7 +256,11 @@ def complete_summary(data, stage, path):
 
 
 def forward_stage(directory, inputs, seeds, common, stage, workers, checkpoint_every):
-    radius, order, margin = VARIANTS[stage]
+    # VARIANTS record absolute margins for the default ten-pixel exclusion; a run
+    # prepared with a different exclusion shifts them all by the same amount, so
+    # the margin14 alternative stays four pixels deeper than the primary.
+    radius, order, nominal = VARIANTS[stage]
+    margin = base_margin(inputs) + (nominal - DEFAULT_EXCLUSION)
     points = inputs['points']; n = len(points)
     run_signature = signature(dict(common, stage=stage, radius=radius, order=order,
                                    margin=margin, seeds_signature=scalar_text(seeds['run_signature'])))
@@ -290,7 +318,7 @@ def reverse_stage(directory, inputs, common, workers, checkpoint_every):
     # tracking, prior, driver code or settings, even if its images are unchanged.
     seed_signature = signature(dict(common, stage='seeds', scale=10., order=2))
     expected_main_signature = signature(dict(common, stage='main', radius=13,
-                                            order=2, margin=10,
+                                            order=2, margin=base_margin(inputs),
                                             seeds_signature=seed_signature))
     verify_saved(forward, expected_main_signature, inputs['points'], 'main')
     for key in ['input_sha256', 'tracks_sha256', 'solver_sha256']:

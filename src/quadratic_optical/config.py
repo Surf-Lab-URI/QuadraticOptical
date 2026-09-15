@@ -10,6 +10,7 @@ DEFAULTS = {
     'surface': {'mode': 'auto', 'index_base': 1, 'offset_px': 0.},
     'availability': 'full', 'intensity_scale': 1.,
     'intensity_offset': 0., 'workers': 1,
+    'surface_exclusion_px': 10.,
     'integration_interval_px': 2., 'depth_step_m': .0001,
     'piv_quality': 'correlation', 'pairs': {},
 }
@@ -71,6 +72,8 @@ def validate(c):
             raise ValueError(key + ' must be finite and positive.')
     if not _number(c['intensity_offset']):
         raise ValueError('intensity_offset must be finite.')
+    if not _number(c['surface_exclusion_px']) or c['surface_exclusion_px'] < 0:
+        raise ValueError('surface_exclusion_px must be finite and not negative.')
     for key in ['workers', 'grid_spacing_px']:
         value = c[key]
         if not _number(value) or int(value) != value or value < 1:
