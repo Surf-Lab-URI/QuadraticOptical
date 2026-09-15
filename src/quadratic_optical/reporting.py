@@ -228,6 +228,35 @@ def profiles(directory,comparison,surface_record):
     savemat(str(directory/'horizontal_integral.mat'),p,long_field_names=True,do_compression=True)
 
 
+_FIELD_ORDER = ['field_u.png', 'field_w.png']
+
+
+def _extra_field_panels(directory):
+    """Optional velocity/gradient panels written alongside by an external script.
+
+    Returns an empty string when no field_*.png files are present, so the report
+    is unchanged for runs that do not have them. Purely presentational: this
+    function reads no numerical data and participates in no signature.
+    """
+    names = sorted(p.name for p in Path(directory).glob('field_*.png'))
+    if not names:
+        return ''
+    names.sort(key=lambda n: (_FIELD_ORDER.index(n) if n in _FIELD_ORDER else len(_FIELD_ORDER), n))
+    head = ('<h2>Velocity and gradient fields</h2><p>Depth-rectified fields on the display grid, '
+            'masked by the acceptance flags. Colour limits are shared across all pairs so panels are '
+            'directly comparable between pairs. Clipped samples are flagged <strong>magenta</strong> '
+            '(below range) and <strong>green</strong> (above); grey marks locations with no accepted '
+            'estimate. The <code>du/dx</code> panel is a finite difference of the smoothed horizontal '
+            'velocity and is <em>not</em> the package screened analytic gradient, which is stricter and '
+            'remains in <code>velocity_gradients.csv</code>. See '
+            '<a href="../field_plots_metadata.json">field_plots_metadata.json</a> for limits, kernel '
+            'size and per-pair clipping fractions.</p>')
+    figs = ''.join('<figure><img src="' + n + '" alt="' + n[:-4].replace('_', ' ') +
+                   '"><figcaption><code>' + html.escape(n) + '</code></figcaption></figure>'
+                   for n in names)
+    return head + figs
+
+
 def render_pair(directory,comparison=None,surface_record=None):
     directory=Path(directory);r=field_export(directory);s=read(directory/'plot_samples.npz')
     surface_record=surface_reference(directory,surface_record)
@@ -244,7 +273,8 @@ def render_pair(directory,comparison=None,surface_record=None):
     files=['quiver','gradient_comparison' if comparison else 'gradients','profiles']
     title=html.escape(directory.name)
     body=''.join('<figure><a href="'+f+'.svg"><img src="'+f+'.png" alt="'+f.replace('_',' ')+'"></a></figure>' for f in files)
-    doc='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>'+title+'</title><style>body{font:17px/1.6 system-ui;margin:2rem auto;max-width:1200px;padding:0 1rem;color:#14283b}img{width:100%;height:auto}figure{margin:2rem 0}a{color:#185ea0}code{background:#eef3f6;padding:.15em}footer{border-top:1px solid #ccc;margin-top:2rem}</style><h1>'+title+'</h1><p>Image-only optical flow. Missing estimates remain missing. PIV and IR data, when available, are comparisons applied after prediction.</p><p><a href="velocity_gradients.csv">Velocity/gradient CSV</a> · <a href="velocity_gradients.mat">MATLAB field</a> · <a href="horizontal_integral.mat">Image-only MATLAB integral profiles</a> · <a href="comparison_notes.json">Comparison settings and IR record</a></p>'+comparison_links+body+'<footer>Gradient colors use the 99th percentile; raw values remain in the numerical data. Click a plot to open its vector-format version.</footer></html>'
+    extra=_extra_field_panels(directory)
+    doc='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>'+title+'</title><style>body{font:17px/1.6 system-ui;margin:2rem auto;max-width:1200px;padding:0 1rem;color:#14283b}img{width:100%;height:auto}figure{margin:2rem 0}a{color:#185ea0}code{background:#eef3f6;padding:.15em}footer{border-top:1px solid #ccc;margin-top:2rem}</style><h1>'+title+'</h1><p>Image-only optical flow. Missing estimates remain missing. PIV and IR data, when available, are comparisons applied after prediction.</p><p><a href="velocity_gradients.csv">Velocity/gradient CSV</a> · <a href="velocity_gradients.mat">MATLAB field</a> · <a href="horizontal_integral.mat">Image-only MATLAB integral profiles</a> · <a href="comparison_notes.json">Comparison settings and IR record</a></p>'+comparison_links+body+extra+'<footer>Gradient colors use the 99th percentile; raw values remain in the numerical data. Click a plot to open its vector-format version.</footer></html>'
     (directory/'index.html').write_text(doc)
 
 def render_batch(output,rows):
