@@ -11,6 +11,7 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.patheffects as patheffects
 from scipy.ndimage import uniform_filter
 from .core.finalize_fields import ConservativeEvaluator
+from .matio import read_experiment_fields
 from .core.fit_fields import atomic_npz
 
 OF='#d54b28';PIV='#2363b1'
@@ -27,7 +28,11 @@ FIELD_U_RANGE=(-.005,.12)       # m/s
 FIELD_W_ABS=.02                 # m/s, symmetric
 FIELD_DUDX_ABS=8.               # s^-1, symmetric
 FIELD_CONTOUR_CM_S=1.           # isotach interval on the smoothed u panel; 0 disables
-FIELD_BELOW='#ff00ff';FIELD_ABOVE='#39ff14';FIELD_ABSENT='#b8b8b8' 
+FIELD_BELOW='#ff00ff';FIELD_ABOVE='#39ff14';FIELD_ABSENT='#b8b8b8'
+FIELD_DATUM_FRAMES=20           # leading surface frames averaged for the still-water datum
+FIELD_SURFACE_LINE='#00e5ff'    # free-surface profile drawn on the z panels
+
+_datum_cache={} 
 
 def jsonable(value):
     """Strict JSON values, with absent/nonfinite diagnostics represented by null."""
@@ -284,7 +289,80 @@ def _field_image(directory,name,values,cmap_name,low,high,coords,title,bar,conto
     return {'clipped_below_percent':round(below,3),'clipped_above_percent':round(above,3)}
 
 
-def field_panels(directory,s):
+def _still_water_datum(record):
+    """Image row of the still-water level from a campaign results file.
+
+    Averages the first FIELD_DATUM_FRAMES frames of ``Surfs.surfsPIV``, which is
+    the same reference the campaign's ``Surfs.eta`` uses, so z here and eta there
+    share a zero. Returns ``(row, note)``; ``row`` is None when no campaign file
+    was supplied or its surface record cannot be read, and ``note`` always says
+    which happened. Cached per file because the campaign read is seconds long.
+    """
+    if not record:
+        return None,'no IR/campaign results file was supplied with this run'
+    source=record.get('source');experiment=record.get('experiment')
+    if not source or not experiment:
+        return None,'the surface record names no campaign file and experiment'
+    if not Path(source).exists():
+        return None,'campaign file '+str(source)+' is not present on this machine'
+    key=(str(source),str(experiment))
+    if key not in _datum_cache:
+        try:
+            values,_=read_experiment_fields(source,experiment,['Surfs.surfsPIV'])
+            frames=np.asarray(values['Surfs.surfsPIV'],float)[:FIELD_DATUM_FRAMES]
+            usable=np.isfinite(frames)&(frames>=0)
+            if not usable.any():
+                _datum_cache[key]=(None,'Surfs.surfsPIV holds no usable rows in the first %d frames'%FIELD_DATUM_FRAMES)
+            else:
+                _datum_cache[key]=(float(frames[usable].mean()),
+                    'mean of the first %d surface frames in %s (Surfs.surfsPIV, %.1f%% of samples usable); '
+                    'the same reference as that campaign\'s Surfs.eta'
+                    %(min(FIELD_DATUM_FRAMES,len(frames)),Path(source).name,100.*usable.mean()))
+        except Exception as problem:
+            _datum_cache[key]=(None,'campaign surface record unreadable (%s: %s)'%(type(problem).__name__,problem))
+    return _datum_cache[key]
+
+
+def _field_image_z(directory,name,values,cmap_name,low,high,grid,surface_mm,title,bar,
+                   datum_note,contours=None):
+    """Same field drawn against absolute height z, with the free surface profile."""
+    grid_x,grid_z=grid
+    below=above=0.
+    finite=np.isfinite(values)
+    if finite.any():
+        below=100.*np.sum(values[finite]<low)/finite.sum()
+        above=100.*np.sum(values[finite]>high)/finite.sum()
+    cmap=plt.get_cmap(cmap_name).with_extremes(bad=FIELD_ABSENT,under=FIELD_BELOW,over=FIELD_ABOVE)
+    fig,ax=plt.subplots(figsize=(13,4.2))
+    mesh_values=np.ma.masked_invalid(values)
+    image=ax.pcolormesh(grid_x,grid_z,mesh_values,cmap=cmap,vmin=low,vmax=high,shading='nearest')
+    if contours is not None and len(contours):
+        lines=ax.contour(grid_x,grid_z,mesh_values,levels=contours,colors='white',linewidths=.8)
+        lines.set_path_effects([patheffects.withStroke(linewidth=1.9,foreground='black')])
+        marked=contours[1::2] if len(contours)>6 else contours
+        for text in ax.clabel(lines,levels=marked,fmt=lambda v:'%g'%round(v*100,3),
+                              fontsize=7,inline=True,inline_spacing=6):
+            text.set_path_effects([patheffects.withStroke(linewidth=2.,foreground='black')])
+    ax.plot(grid_x[0],surface_mm,color=FIELD_SURFACE_LINE,linewidth=1.4,
+            path_effects=[patheffects.withStroke(linewidth=2.8,foreground='black')],
+            label='free surface',zorder=5)
+    ax.axhline(0.,color='0.25',linewidth=.8,linestyle='--',zorder=4)
+    ax.set_xlabel('horizontal position x (cm)');ax.set_ylabel('height z (mm)')
+    ax.set_xlim(grid_x[0][0],grid_x[0][-1])
+    ax.set_ylim(np.nanmin(grid_z),max(np.nanmax(surface_mm),0.)+1.)
+    ax.set_title(title,fontsize=11,pad=28)
+    ax.text(.5,1.052,'scale %.4g to %.4g   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
+            '   |   grey = no accepted estimate'%(low,high,below,above),
+            transform=ax.transAxes,ha='center',va='bottom',fontsize=8,color='0.35')
+    ax.text(.5,1.012,'z = 0 at '+datum_note,transform=ax.transAxes,ha='center',va='bottom',
+            fontsize=8,color='0.35')
+    ax.legend(loc='lower right',fontsize=8,framealpha=.85)
+    fig.colorbar(image,ax=ax,fraction=.026,pad=.012,extend='both').set_label(bar)
+    save(fig,directory,name)
+    return {'clipped_below_percent':round(below,3),'clipped_above_percent':round(above,3)}
+
+
+def field_panels(directory,s,surface_record=None):
     """Depth-rectified velocity and gradient images, with their acceptance masks applied.
 
     Returns the settings record, or None when the display grid is too small.
@@ -329,6 +407,25 @@ def field_panels(directory,s):
     for base,values,cmap_name,low,high,title,bar,contours in jobs:
         clipping[base+'.png']=_field_image(directory,base,values,cmap_name,low,high,coords,
                                            title,bar,contours)
+    # Absolute-height versions. Each sample keeps its own image row, so the
+    # lattice is not rectangular in z and is drawn as a mesh rather than resampled.
+    query_y=np.asarray(s['query'])[:,1].reshape(rows,columns)
+    surface_y=query_y[0]-z[0]
+    datum_row,datum_note=_still_water_datum(surface_record)
+    if datum_row is None:
+        fallback=float(np.mean(surface_y))
+        datum_source='frame'
+        datum_note=('the mean surface of this frame pair (row %.2f) because %s'%(fallback,datum_note))
+        datum_row=fallback
+    else:
+        datum_source='campaign'
+        datum_note='the still-water level (row %.2f): %s'%(datum_row,datum_note)
+    grid=(np.tile(coords[0],(rows,1)),(datum_row-query_y)*dx*1000.)
+    surface_mm=(datum_row-surface_y)*dx*1000.
+    for base,values,cmap_name,low,high,title,bar,contours in jobs:
+        clipping[base+'_z.png']=_field_image_z(directory,base+'_z',values,cmap_name,low,high,
+                                               grid,surface_mm,title+'   [height z]',bar,
+                                               datum_note,contours)
     record={'smoothing_px':FIELD_SMOOTH_PX,'kernel_cells_depth_x':list(cells),
             'kernel_px_depth_x':[cells[0]*span_z,cells[1]*span_x],
             'grid_spacing_px':{'x':span_x,'depth':span_z},
@@ -341,6 +438,10 @@ def field_panels(directory,s):
             'flag_colours':{'below':FIELD_BELOW,'above':FIELD_ABOVE,'no_estimate':FIELD_ABSENT},
             'source':'plot_samples.npz display grid, depth-rectified, acceptance mask applied',
             'dudx_note':'central finite difference of the smoothed u along x; not the screened analytic gradient',
+            'z_datum':{'source':datum_source,'image_row':datum_row,'description':datum_note,
+                       'frames_averaged':FIELD_DATUM_FRAMES if datum_source=='campaign' else None,
+                       'surface_mean_z_mm':float(np.mean(surface_mm)),
+                       'convention':'z increases upward, metres converted to mm; depth panels are unaffected'},
             'clipping_percent':clipping}
     write_json(directory/'field_panels.json',record)
     return record
@@ -367,8 +468,11 @@ def _extra_field_panels(directory):
             'estimate. The <code>du/dx</code> panel is a finite difference of the smoothed horizontal '
             'velocity and is <em>not</em> the package screened analytic gradient, which is stricter and '
             'remains in <code>velocity_gradients.csv</code>. See '
-            '<a href="field_panels.json">field_panels.json</a> for limits, kernel size and '
-            'clipping fractions.</p>')
+            '<a href="field_panels.json">field_panels.json</a> for limits, kernel size, the z '
+            'datum and clipping fractions.</p><p>Panels ending <code>_z</code> use absolute height '
+            'z with the free surface drawn on top; the others use depth below the local surface. '
+            'Each z panel states its own datum: the still-water level from the campaign results '
+            'file when one was supplied, otherwise that frame pair\'s own mean surface.</p>')
     figs = ''
     for n in names:
         img = '<img src="' + n + '" alt="' + n[:-4].replace('_', ' ') + '">'
@@ -382,7 +486,7 @@ def render_pair(directory,comparison=None,surface_record=None):
     directory=Path(directory);r=field_export(directory);s=read(directory/'plot_samples.npz')
     surface_record=surface_reference(directory,surface_record)
     quiver(directory,r,comparison);gradients(directory,s,comparison);profiles(directory,comparison,surface_record)
-    field_panels(directory,s)
+    field_panels(directory,s,surface_record)
     notes={'piv_comparison':comparison['summary'] if comparison else None,'ir_surface':surface_record}
     write_json(directory/'comparison_notes.json',notes)
     comparison_links=''

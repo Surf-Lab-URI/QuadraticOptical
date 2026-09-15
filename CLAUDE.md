@@ -84,6 +84,24 @@ and `piv_quality` enters the preparation signature (`prepare.py:121`), so adding
 one would invalidate every existing output directory for a change that alters no
 number.
 
+Each panel also has an absolute-height twin ending `_z`, drawn against height z
+with the free surface plotted on it. Because every sample keeps its own image
+row, that lattice is not rectangular in z and is drawn as a mesh rather than
+resampled onto a regular grid. The depth-below-surface panels are unchanged.
+
+`z = 0` is the still-water level: the mean of the first `FIELD_DATUM_FRAMES`
+(20) frames of `Surfs.surfsPIV` in the campaign results file, which is the same
+reference that file's `Surfs.eta` uses, so z here and eta there share a zero.
+That read is cached per file. When no campaign file was supplied, or it cannot
+be read, the datum falls back to that frame pair's own mean surface and the
+panel says so on its face. `field_panels.json` records which was used and why.
+
+For the ExpLCL data note that `surfsPIV` is the originally detected surface,
+while the fitting trace is `surfacePIVImg + offset_px` = `surfsPIV + 10 - 12` =
+`surfsPIV - 2`. So the plotted free-surface line sits about 2 px (0.113 mm)
+above where eta would put it. That is the known consequence of choosing
+`offset_px = -12` for comparability with the method document rather than -10.
+
 Colour limits are fixed rather than per-pair percentiles, so panels from
 different pairs are directly comparable. Clipped samples are flagged magenta
 (below) and green (above) instead of silently saturating; grey means no accepted
