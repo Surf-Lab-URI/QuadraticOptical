@@ -8,10 +8,26 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.patheffects as patheffects
+from scipy.ndimage import uniform_filter
 from .core.finalize_fields import ConservativeEvaluator
 from .core.fit_fields import atomic_npz
 
 OF='#d54b28';PIV='#2363b1'
+
+# Velocity/gradient field panels. These are presentational settings, held here
+# rather than in the JSON configuration on purpose: every configuration key
+# except workers and piv_quality enters the preparation signature, so adding one
+# would invalidate every existing output directory for a change that alters no
+# number. Limits are fixed rather than per-pair percentiles so that panels from
+# different pairs of the same experiment are directly comparable.
+FIELD_SMOOTH_PX=40.             # box filter width in image pixels
+FIELD_MIN_VALID=.5              # minimum valid fraction within the kernel
+FIELD_U_RANGE=(-.005,.12)       # m/s
+FIELD_W_ABS=.02                 # m/s, symmetric
+FIELD_DUDX_ABS=8.               # s^-1, symmetric
+FIELD_CONTOUR_CM_S=1.           # isotach interval on the smoothed u panel; 0 disables
+FIELD_BELOW='#ff00ff';FIELD_ABOVE='#39ff14';FIELD_ABSENT='#b8b8b8' 
 
 def jsonable(value):
     """Strict JSON values, with absent/nonfinite diagnostics represented by null."""
@@ -228,6 +244,108 @@ def profiles(directory,comparison,surface_record):
     savemat(str(directory/'horizontal_integral.mat'),p,long_field_names=True,do_compression=True)
 
 
+def _masked_box(field,valid,size,min_valid):
+    """Box filter that averages over accepted samples only, so gaps do not spread."""
+    f=np.where(valid,np.nan_to_num(field),0.)
+    total=uniform_filter(f,size=size,mode='nearest')
+    share=uniform_filter(valid.astype(float),size=size,mode='nearest')
+    out=np.divide(total,share,out=np.full_like(total,np.nan),where=share>0)
+    return np.where(share>=min_valid,out,np.nan)
+
+
+def _field_image(directory,name,values,cmap_name,low,high,coords,title,bar,contours=None):
+    x_cm,z_mm=coords
+    below=above=0.
+    finite=np.isfinite(values)
+    if finite.any():
+        below=100.*np.sum(values[finite]<low)/finite.sum()
+        above=100.*np.sum(values[finite]>high)/finite.sum()
+    cmap=plt.get_cmap(cmap_name).with_extremes(bad=FIELD_ABSENT,under=FIELD_BELOW,over=FIELD_ABOVE)
+    fig,ax=plt.subplots(figsize=(13,4.))
+    extent=[x_cm[0],x_cm[-1],z_mm[-1],z_mm[0]]
+    image=ax.imshow(np.ma.masked_invalid(values),extent=extent,origin='upper',aspect='auto',
+                    cmap=cmap,vmin=low,vmax=high,interpolation='nearest')
+    if contours is not None and len(contours):
+        grid_x,grid_z=np.meshgrid(x_cm,z_mm)
+        lines=ax.contour(grid_x,grid_z,np.ma.masked_invalid(values),levels=contours,
+                         colors='white',linewidths=.8)
+        lines.set_path_effects([patheffects.withStroke(linewidth=1.9,foreground='black')])
+        marked=contours[1::2] if len(contours)>6 else contours
+        for text in ax.clabel(lines,levels=marked,fmt=lambda v:'%g'%round(v*100,3),
+                              fontsize=7,inline=True,inline_spacing=6):
+            text.set_path_effects([patheffects.withStroke(linewidth=2.,foreground='black')])
+    ax.set_xlabel('horizontal position x (cm)');ax.set_ylabel('depth below local surface (mm)')
+    ax.set_title(title,fontsize=11,pad=20)
+    ax.text(.5,1.012,'scale %.4g to %.4g   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
+            '   |   grey = no accepted estimate'%(low,high,below,above),
+            transform=ax.transAxes,ha='center',va='bottom',fontsize=8,color='0.35')
+    fig.colorbar(image,ax=ax,fraction=.026,pad=.012,extend='both').set_label(bar)
+    save(fig,directory,name)
+    return {'clipped_below_percent':round(below,3),'clipped_above_percent':round(above,3)}
+
+
+def field_panels(directory,s):
+    """Depth-rectified velocity and gradient images, with their acceptance masks applied.
+
+    Returns the settings record, or None when the display grid is too small.
+    The du/dx panel is a finite difference of the smoothed horizontal velocity.
+    It is deliberately not the screened analytic gradient, which is stricter and
+    stays in velocity_gradients.csv; this one is masked only by acceptance of u.
+    """
+    directory=Path(directory)
+    x=np.asarray(s['x_axis_px'],float);z=np.asarray(s['depth_axis_px'],float)
+    rows,columns=len(z),len(x)
+    if rows<2 or columns<2:return None
+    dx=float(s['DX']);dt=float(s['DT'])
+    accepted=np.asarray(s['accepted']).reshape(rows,columns)
+    disp=np.asarray(s['disp']).reshape(rows,columns,2)
+    u=np.where(accepted,disp[...,0]*dx/dt,np.nan)
+    w=np.where(accepted,-disp[...,1]*dx/dt,np.nan)
+    span_x=float(x[1]-x[0]);span_z=float(z[1]-z[0])
+    cells=(max(1,int(np.rint(FIELD_SMOOTH_PX/span_z))),max(1,int(np.rint(FIELD_SMOOTH_PX/span_x))))
+    smooth_u=_masked_box(u,accepted,cells,FIELD_MIN_VALID)
+    smooth_w=_masked_box(w,accepted,cells,FIELD_MIN_VALID)
+    dudx=np.gradient(smooth_u,span_x*dx,axis=1)
+    step=FIELD_CONTOUR_CM_S/100.
+    levels=np.arange(step,FIELD_U_RANGE[1]+step/2,step) if FIELD_CONTOUR_CM_S>0 else np.array([])
+    coords=(x*dx*100.,z*dx*1000.)
+    tag='%gpx'%FIELD_SMOOTH_PX
+    name=Path(directory).name
+    contour_note='   (contours every %g cm/s)'%FIELD_CONTOUR_CM_S if len(levels) else ''
+    jobs=[('field_u',u,'magma',FIELD_U_RANGE[0],FIELD_U_RANGE[1],
+           name+'   horizontal velocity u  (unsmoothed)','u  (m s$^{-1}$)',None),
+          ('field_w',w,'RdBu_r',-FIELD_W_ABS,FIELD_W_ABS,
+           name+'   vertical velocity w, positive up  (unsmoothed)','w  (m s$^{-1}$)',None),
+          ('field_u_smooth'+tag,smooth_u,'magma',FIELD_U_RANGE[0],FIELD_U_RANGE[1],
+           '%s   horizontal velocity u,  %g px smoothed%s'%(name,FIELD_SMOOTH_PX,contour_note),
+           'u  (m s$^{-1}$)',levels),
+          ('field_w_smooth'+tag,smooth_w,'RdBu_r',-FIELD_W_ABS,FIELD_W_ABS,
+           '%s   vertical velocity w (positive up),  %g px smoothed'%(name,FIELD_SMOOTH_PX),
+           'w  (m s$^{-1}$)',None),
+          ('field_dudx_from_smooth'+tag,dudx,'PuOr_r',-FIELD_DUDX_ABS,FIELD_DUDX_ABS,
+           '%s   du/dx from %g px smoothed u  (finite difference)'%(name,FIELD_SMOOTH_PX),
+           r'$\partial u/\partial x$  (s$^{-1}$)',levels if False else None)]
+    clipping={}
+    for base,values,cmap_name,low,high,title,bar,contours in jobs:
+        clipping[base+'.png']=_field_image(directory,base,values,cmap_name,low,high,coords,
+                                           title,bar,contours)
+    record={'smoothing_px':FIELD_SMOOTH_PX,'kernel_cells_depth_x':list(cells),
+            'kernel_px_depth_x':[cells[0]*span_z,cells[1]*span_x],
+            'grid_spacing_px':{'x':span_x,'depth':span_z},
+            'minimum_valid_fraction':FIELD_MIN_VALID,
+            'colour_limits':{'u_m_per_s':list(FIELD_U_RANGE),
+                             'w_m_per_s':[-FIELD_W_ABS,FIELD_W_ABS],
+                             'dudx_per_s':[-FIELD_DUDX_ABS,FIELD_DUDX_ABS]},
+            'contour_interval_cm_s':FIELD_CONTOUR_CM_S,
+            'contour_levels_cm_s':[round(float(v)*100,3) for v in levels],
+            'flag_colours':{'below':FIELD_BELOW,'above':FIELD_ABOVE,'no_estimate':FIELD_ABSENT},
+            'source':'plot_samples.npz display grid, depth-rectified, acceptance mask applied',
+            'dudx_note':'central finite difference of the smoothed u along x; not the screened analytic gradient',
+            'clipping_percent':clipping}
+    write_json(directory/'field_panels.json',record)
+    return record
+
+
 _FIELD_ORDER = ['field_u.png', 'field_w.png']
 
 
@@ -249,11 +367,14 @@ def _extra_field_panels(directory):
             'estimate. The <code>du/dx</code> panel is a finite difference of the smoothed horizontal '
             'velocity and is <em>not</em> the package screened analytic gradient, which is stricter and '
             'remains in <code>velocity_gradients.csv</code>. See '
-            '<a href="../field_plots_metadata.json">field_plots_metadata.json</a> for limits, kernel '
-            'size and per-pair clipping fractions.</p>')
-    figs = ''.join('<figure><img src="' + n + '" alt="' + n[:-4].replace('_', ' ') +
-                   '"><figcaption><code>' + html.escape(n) + '</code></figcaption></figure>'
-                   for n in names)
+            '<a href="field_panels.json">field_panels.json</a> for limits, kernel size and '
+            'clipping fractions.</p>')
+    figs = ''
+    for n in names:
+        img = '<img src="' + n + '" alt="' + n[:-4].replace('_', ' ') + '">'
+        if (Path(directory) / (n[:-4] + '.svg')).exists():
+            img = '<a href="' + n[:-4] + '.svg">' + img + '</a>'
+        figs += '<figure>' + img + '<figcaption><code>' + html.escape(n) + '</code></figcaption></figure>'
     return head + figs
 
 
@@ -261,6 +382,7 @@ def render_pair(directory,comparison=None,surface_record=None):
     directory=Path(directory);r=field_export(directory);s=read(directory/'plot_samples.npz')
     surface_record=surface_reference(directory,surface_record)
     quiver(directory,r,comparison);gradients(directory,s,comparison);profiles(directory,comparison,surface_record)
+    field_panels(directory,s)
     notes={'piv_comparison':comparison['summary'] if comparison else None,'ir_surface':surface_record}
     write_json(directory/'comparison_notes.json',notes)
     comparison_links=''

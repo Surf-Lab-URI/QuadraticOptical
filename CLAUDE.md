@@ -63,6 +63,38 @@ Fastest complete mental model: read `cli.py:50-145` (one screen, names every sta
 order), then the single acceptance expression at `core/finalize_fields.py:266-274`.
 Between those two you can explain nearly any observed output.
 
+## Velocity and gradient field panels
+
+`reporting.field_panels()` draws five extra figures per pair from
+`plot_samples.npz` (the depth-rectified display grid), called from `render_pair`
+so they are produced by every `run` and `compare`:
+
+| File | Contents |
+|------|----------|
+| `field_u` | horizontal velocity |
+| `field_w` | vertical velocity, positive up |
+| `field_u_smooth40px` | smoothed u, with 1 cm/s isotachs |
+| `field_w_smooth40px` | smoothed w |
+| `field_dudx_from_smooth40px` | du/dx by finite difference of the smoothed u |
+
+Settings are module constants at the top of `reporting.py` (`FIELD_SMOOTH_PX`,
+`FIELD_U_RANGE`, `FIELD_W_ABS`, `FIELD_DUDX_ABS`, `FIELD_CONTOUR_CM_S`). They are
+deliberately **not** JSON configuration keys: every config key except `workers`
+and `piv_quality` enters the preparation signature (`prepare.py:121`), so adding
+one would invalidate every existing output directory for a change that alters no
+number.
+
+Colour limits are fixed rather than per-pair percentiles, so panels from
+different pairs are directly comparable. Clipped samples are flagged magenta
+(below) and green (above) instead of silently saturating; grey means no accepted
+estimate. Each pair records limits, kernel and clipping fractions in
+`field_panels.json`.
+
+The `du/dx` panel is masked only by acceptance of `u`. It is **not** the screened
+analytic gradient, which is stricter (depth >= 20 px, a track within 10 px,
+cross-variant agreement <= 0.08) and remains in `velocity_gradients.csv`. Do not
+quote numbers off the panel where the screened array says NaN.
+
 ## Traps
 
 These cost hours if discovered by debugging rather than by being told.
