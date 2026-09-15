@@ -102,6 +102,14 @@ while the fitting trace is `surfacePIVImg + offset_px` = `surfsPIV + 10 - 12` =
 above where eta would put it. That is the known consequence of choosing
 `offset_px = -12` for comparability with the method document rather than -10.
 
+All field panels are drawn at a true 1:1 aspect, with **both axes in
+millimetres**, so feature and wave slopes are not distorted. The units have to
+match for this: an earlier version used cm horizontally and mm vertically, where
+an "equal" aspect would have locked 1 cm to 1 mm and made the distortion ten
+times worse. The panels are consequently wide and short, and their colour bars
+are attached to the drawn axes rather than the subplot slot, which an
+aspect-locked axes no longer fills.
+
 Colour limits are fixed rather than per-pair percentiles, so panels from
 different pairs are directly comparable. Clipped samples are flagged magenta
 (below) and green (above) instead of silently saturating; grey means no accepted

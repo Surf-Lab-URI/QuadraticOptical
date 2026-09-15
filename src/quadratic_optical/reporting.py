@@ -9,6 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import matplotlib.patheffects as patheffects
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.ndimage import uniform_filter
 from .core.finalize_fields import ConservativeEvaluator
 from .matio import read_experiment_fields
@@ -31,6 +32,8 @@ FIELD_CONTOUR_CM_S=1.           # isotach interval on the smoothed u panel; 0 di
 FIELD_BELOW='#ff00ff';FIELD_ABOVE='#39ff14';FIELD_ABSENT='#b8b8b8'
 FIELD_DATUM_FRAMES=20           # leading surface frames averaged for the still-water datum
 FIELD_SURFACE_LINE='#00e5ff'    # free-surface profile drawn on the z panels
+FIELD_FIG_WIDTH_IN=17.          # panels are drawn at a true 1:1 aspect, so they are wide and short
+FIELD_FIG_EXTRA_IN=1.9          # vertical allowance for titles, labels and the colour bar
 
 _datum_cache={} 
 
@@ -249,6 +252,18 @@ def profiles(directory,comparison,surface_record):
     savemat(str(directory/'horizontal_integral.mat'),p,long_field_names=True,do_compression=True)
 
 
+def _field_figsize(x_mm,y_mm,width=FIELD_FIG_WIDTH_IN,extra=FIELD_FIG_EXTRA_IN):
+    """Figure size that leaves the axes close to its true 1:1 shape.
+
+    With an equal aspect the axes box is set by the data, so sizing the figure to
+    match keeps the surrounding whitespace small; tight bounding boxes on save
+    trim whatever is left.
+    """
+    span_x=float(np.nanmax(x_mm)-np.nanmin(x_mm));span_y=float(np.nanmax(y_mm)-np.nanmin(y_mm))
+    if span_x<=0 or span_y<=0:return (width,4.)
+    return (width,min(12.,max(2.4,width*span_y/span_x+extra)))
+
+
 def _masked_box(field,valid,size,min_valid):
     """Box filter that averages over accepted samples only, so gaps do not spread."""
     f=np.where(valid,np.nan_to_num(field),0.)
@@ -259,19 +274,21 @@ def _masked_box(field,valid,size,min_valid):
 
 
 def _field_image(directory,name,values,cmap_name,low,high,coords,title,bar,contours=None):
-    x_cm,z_mm=coords
+    x_mm,z_mm=coords
     below=above=0.
     finite=np.isfinite(values)
     if finite.any():
         below=100.*np.sum(values[finite]<low)/finite.sum()
         above=100.*np.sum(values[finite]>high)/finite.sum()
     cmap=plt.get_cmap(cmap_name).with_extremes(bad=FIELD_ABSENT,under=FIELD_BELOW,over=FIELD_ABOVE)
-    fig,ax=plt.subplots(figsize=(13,4.))
-    extent=[x_cm[0],x_cm[-1],z_mm[-1],z_mm[0]]
-    image=ax.imshow(np.ma.masked_invalid(values),extent=extent,origin='upper',aspect='auto',
+    fig,ax=plt.subplots(figsize=_field_figsize(x_mm,z_mm))
+    extent=[x_mm[0],x_mm[-1],z_mm[-1],z_mm[0]]
+    # Equal aspect in matching units: one millimetre is the same length on both
+    # axes, so feature slopes are not distorted.
+    image=ax.imshow(np.ma.masked_invalid(values),extent=extent,origin='upper',aspect='equal',
                     cmap=cmap,vmin=low,vmax=high,interpolation='nearest')
     if contours is not None and len(contours):
-        grid_x,grid_z=np.meshgrid(x_cm,z_mm)
+        grid_x,grid_z=np.meshgrid(x_mm,z_mm)
         lines=ax.contour(grid_x,grid_z,np.ma.masked_invalid(values),levels=contours,
                          colors='white',linewidths=.8)
         lines.set_path_effects([patheffects.withStroke(linewidth=1.9,foreground='black')])
@@ -279,12 +296,15 @@ def _field_image(directory,name,values,cmap_name,low,high,coords,title,bar,conto
         for text in ax.clabel(lines,levels=marked,fmt=lambda v:'%g'%round(v*100,3),
                               fontsize=7,inline=True,inline_spacing=6):
             text.set_path_effects([patheffects.withStroke(linewidth=2.,foreground='black')])
-    ax.set_xlabel('horizontal position x (cm)');ax.set_ylabel('depth below local surface (mm)')
+    ax.set_xlabel('horizontal position x (mm)');ax.set_ylabel('depth below local surface (mm)')
     ax.set_title(title,fontsize=11,pad=20)
     ax.text(.5,1.012,'scale %.4g to %.4g   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
             '   |   grey = no accepted estimate'%(low,high,below,above),
             transform=ax.transAxes,ha='center',va='bottom',fontsize=8,color='0.35')
-    fig.colorbar(image,ax=ax,fraction=.026,pad=.012,extend='both').set_label(bar)
+    # An aspect-locked axes is shorter than its subplot slot, so tie the colour
+    # bar to the drawn axes rather than letting it span the original height.
+    bar_axes=make_axes_locatable(ax).append_axes('right',size='0.9%',pad=.12,axes_class=plt.Axes)
+    fig.colorbar(image,cax=bar_axes,extend='both').set_label(bar)
     save(fig,directory,name)
     return {'clipped_below_percent':round(below,3),'clipped_above_percent':round(above,3)}
 
@@ -333,7 +353,7 @@ def _field_image_z(directory,name,values,cmap_name,low,high,grid,surface_mm,titl
         below=100.*np.sum(values[finite]<low)/finite.sum()
         above=100.*np.sum(values[finite]>high)/finite.sum()
     cmap=plt.get_cmap(cmap_name).with_extremes(bad=FIELD_ABSENT,under=FIELD_BELOW,over=FIELD_ABOVE)
-    fig,ax=plt.subplots(figsize=(13,4.2))
+    fig,ax=plt.subplots(figsize=_field_figsize(grid_x[0],grid_z))
     mesh_values=np.ma.masked_invalid(values)
     image=ax.pcolormesh(grid_x,grid_z,mesh_values,cmap=cmap,vmin=low,vmax=high,shading='nearest')
     if contours is not None and len(contours):
@@ -347,9 +367,10 @@ def _field_image_z(directory,name,values,cmap_name,low,high,grid,surface_mm,titl
             path_effects=[patheffects.withStroke(linewidth=2.8,foreground='black')],
             label='free surface',zorder=5)
     ax.axhline(0.,color='0.25',linewidth=.8,linestyle='--',zorder=4)
-    ax.set_xlabel('horizontal position x (cm)');ax.set_ylabel('height z (mm)')
+    ax.set_xlabel('horizontal position x (mm)');ax.set_ylabel('height z (mm)')
     ax.set_xlim(grid_x[0][0],grid_x[0][-1])
     ax.set_ylim(np.nanmin(grid_z),max(np.nanmax(surface_mm),0.)+1.)
+    ax.set_aspect('equal')
     ax.set_title(title,fontsize=11,pad=28)
     ax.text(.5,1.052,'scale %.4g to %.4g   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
             '   |   grey = no accepted estimate'%(low,high,below,above),
@@ -357,7 +378,10 @@ def _field_image_z(directory,name,values,cmap_name,low,high,grid,surface_mm,titl
     ax.text(.5,1.012,'z = 0 at '+datum_note,transform=ax.transAxes,ha='center',va='bottom',
             fontsize=8,color='0.35')
     ax.legend(loc='lower right',fontsize=8,framealpha=.85)
-    fig.colorbar(image,ax=ax,fraction=.026,pad=.012,extend='both').set_label(bar)
+    # An aspect-locked axes is shorter than its subplot slot, so tie the colour
+    # bar to the drawn axes rather than letting it span the original height.
+    bar_axes=make_axes_locatable(ax).append_axes('right',size='0.9%',pad=.12,axes_class=plt.Axes)
+    fig.colorbar(image,cax=bar_axes,extend='both').set_label(bar)
     save(fig,directory,name)
     return {'clipped_below_percent':round(below,3),'clipped_above_percent':round(above,3)}
 
@@ -386,7 +410,7 @@ def field_panels(directory,s,surface_record=None):
     dudx=np.gradient(smooth_u,span_x*dx,axis=1)
     step=FIELD_CONTOUR_CM_S/100.
     levels=np.arange(step,FIELD_U_RANGE[1]+step/2,step) if FIELD_CONTOUR_CM_S>0 else np.array([])
-    coords=(x*dx*100.,z*dx*1000.)
+    coords=(x*dx*1000.,z*dx*1000.)
     tag='%gpx'%FIELD_SMOOTH_PX
     name=Path(directory).name
     contour_note='   (contours every %g cm/s)'%FIELD_CONTOUR_CM_S if len(levels) else ''
