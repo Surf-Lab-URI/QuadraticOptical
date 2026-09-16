@@ -47,6 +47,30 @@ def surface_annotations(pairs, results_path, experiment=None):
     return records
 
 
+def manual_for(folder, directory):
+    """Held-out hand-matched comparison for this pair, or None when absent.
+
+    The pair's identity comes from its own frozen manifest rather than from
+    command-line arguments, so this works the same under run and compare. Read
+    only after the prediction is frozen; a missing file is not an error, since
+    only a few pairs are ever hand-matched.
+    """
+    if not folder:
+        return None
+    manifest_path = Path(directory)/'input_manifest.json'
+    if not manifest_path.exists():
+        return None
+    manifest = json.loads(manifest_path.read_text())
+    pair_number = manifest.get('pair_number')
+    if pair_number is None:
+        return None
+    from .manual import find_manual, compare_manual
+    record = find_manual(folder, manifest.get('experiment'), int(pair_number))
+    if record is None:
+        return None
+    return compare_manual(directory, record)
+
+
 def run_batch(args):
     from .prepare import prepare
     from .core import tracking, fit_fields, finalize_fields, integrate_profile
@@ -108,9 +132,16 @@ def run_batch(args):
                     print('Prediction frozen. Reading supplied PIV for comparison.', flush=True)
                     comparison = compare_pair(directory, pair.piv_mat, quality=cfg['piv_quality'],
                                               surface_records=selected_surface)
+                manual_record = manual_for(args.manual_ptv, directory)
+                if manual_record is not None:
+                    print('Hand-matched comparison: %d picks, %d passing the screen.'
+                          % (manual_record['count'], manual_record['accepted']), flush=True)
                 stage('reporting')
-                render_pair(directory, comparison, selected_surface)
+                render_pair(directory, comparison, selected_surface, manual_record)
                 row.update(status='complete', image_only=True,
+                    manual_comparison=None if manual_record is None else {
+                        'source': manual_record['manual']['path'], 'count': manual_record['count'],
+                        'accepted': manual_record['accepted'], 'statistics': manual_record['statistics']},
                     PIV_used_in_prediction=False, PIV_comparison=comparison is not None,
                     piv_quality=cfg['piv_quality'] if comparison else None,
                     surface_record=selected_surface, stage='complete')
@@ -162,7 +193,8 @@ def compare_existing(args):
     with output_lock(directory):
         surface_record=surface_reference(directory,surface_record)
         comparison = compare_pair(directory, args.piv, quality=args.quality, surface_records=surface_record)
-        render_pair(directory, comparison, surface_record)
+        manual_record = manual_for(getattr(args, 'manual_ptv', None), directory)
+        render_pair(directory, comparison, surface_record, manual_record)
         write_json(directory/'comparison_status.json',dict(status='complete',quality=args.quality,
             PIV_used_in_prediction=False,refitting_performed=False,surface_record=surface_record))
         status_path=directory/'status.json'
@@ -246,9 +278,12 @@ def parser():
     r.add_argument('--piv-quality', choices=['correlation', 'finite'],
                    help='Comparison only: require finite dcor (default), or retain supplied finite vectors without dcor.')
     r.add_argument('--ir-results');r.add_argument('--experiment')
+    r.add_argument('--manual-ptv', help='directory of hand-matched particle .mat files; matched to a '
+                   'pair by the exp_name and image_pair_number stored inside them, not by filename')
     c = sub.add_parser('compare', help='Compare an existing frozen prediction without refitting.')
     c.add_argument('directory');c.add_argument('--piv', required=True);c.add_argument('--quality', '--piv-quality', choices=['correlation','finite'], default='correlation')
     c.add_argument('--ir-results');c.add_argument('--experiment');c.add_argument('--pair-number', type=int)
+    c.add_argument('--manual-ptv', help='directory of hand-matched particle .mat files')
     e = sub.add_parser('extract', help='Export raw PIV frames and campaign surfaces into a readable pair directory.')
     e.add_argument('--run-dir', required=True, help='experiment run directory containing PIVRaw/PIV')
     e.add_argument('--results', required=True, help='campaign results file holding Surfs.surfsPIV')

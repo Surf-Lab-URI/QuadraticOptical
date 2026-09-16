@@ -15,7 +15,7 @@ from .core.finalize_fields import ConservativeEvaluator
 from .matio import read_experiment_fields
 from .core.fit_fields import atomic_npz
 
-OF='#d54b28';PIV='#2363b1'
+OF='#d54b28';PIV='#2363b1';MANUAL='#17806d'
 
 # Velocity/gradient field panels. These are presentational settings, held here
 # rather than in the JSON configuration on purpose: every configuration key
@@ -471,6 +471,115 @@ def field_panels(directory,s,surface_record=None):
     return record
 
 
+def manual_arrows(directory,record):
+    """Predicted and hand-matched arrows from the same origins, at true aspect."""
+    directory=Path(directory)
+    with np.load(directory/'inputs.npz',allow_pickle=False) as f:
+        raw=f['rawA'].astype(float);surface=f['surface_a'].astype(float)
+    dx=float(record['DX'])*1000.                       # mm per pixel
+    origin=np.asarray(record['origin_zero_based'],float).reshape(2)
+    source=np.asarray(record['source_px'],float)-origin
+    manual=np.asarray(record['manual_disp_px'],float)
+    predicted=np.asarray(record['predicted_disp_px'],float)
+    accepted=np.asarray(record['accepted_mask'],bool)
+    reference=float(np.median(surface))
+    gain=4.
+    tips=np.concatenate([source+gain*manual,source[accepted]+gain*predicted[accepted]]) if accepted.any() else source+gain*manual
+    span=np.concatenate([source,tips])
+    pad=18.
+    left=max(0,int(np.floor(span[:,0].min()-pad)));right=min(raw.shape[1],int(np.ceil(span[:,0].max()+pad)))
+    top=max(0,int(np.floor(span[:,1].min()-pad)));bottom=min(raw.shape[0],int(np.ceil(span[:,1].max()+pad)))
+    crop=raw[top:bottom,left:right]
+    fig,ax=plt.subplots(figsize=(14,5.2))
+    ax.imshow(crop,cmap='gray_r',vmin=0,vmax=180,alpha=.35,interpolation='nearest',aspect='equal',
+              extent=[left*dx,right*dx,(reference-bottom)*dx,(reference-top)*dx])
+    columns=np.arange(left,right)
+    ax.plot((columns+.5)*dx,(reference-surface[left:right])*dx,color='#087c87',lw=1.,label='surface (frame A)')
+    def draw(values,mask,colour,label):
+        if not mask.any():return
+        ax.quiver(source[mask,0]*dx,(reference-source[mask,1])*dx,
+                  values[mask,0]*dx,-values[mask,1]*dx,color=colour,angles='xy',
+                  scale_units='xy',scale=1./gain,width=.0022,label=label)
+    draw(manual,np.ones(len(source),bool),MANUAL,'Hand-matched (%d)'%len(source))
+    draw(predicted,accepted,OF,'Image-only optical flow (%d accepted)'%int(accepted.sum()))
+    if (~accepted).any():
+        ax.plot(source[~accepted,0]*dx,(reference-source[~accepted,1])*dx,'x',color='#b03a3a',
+                ms=4.5,mew=.9,label='withheld by the screen (%d)'%int((~accepted).sum()))
+    ax.set_xlabel('horizontal position x (mm)');ax.set_ylabel('height above median surface (mm)')
+    ax.set_title('%s   hand-matched particles vs image-only prediction   (arrows %gx)'
+                 %(directory.name,gain),fontsize=11,pad=16)
+    best=[b for b in record['statistics'] if b['subset']=='passing vector screen']
+    if best and best[0]['count']:
+        b=best[0]
+        ax.text(.5,1.006,'endpoint disagreement, screened: mean %.3f px, median %.3f px, rms %.3f px  '
+                '(n=%d of %d)'%(b['mean_px'],b['median_px'],b['rms_px'],b['count'],len(source)),
+                transform=ax.transAxes,ha='center',va='bottom',fontsize=8,color='0.35')
+    ax.legend(loc='lower right',fontsize=8,framealpha=.9)
+    save(fig,directory,'manual_comparison')
+
+
+def manual_block(record):
+    """Report section: the static figure plus an inline adjustable-magnification view."""
+    if record is None:return ''
+    source=np.asarray(record['source_px'],float);manual=np.asarray(record['manual_disp_px'],float)
+    predicted=np.asarray(record['predicted_disp_px'],float);accepted=np.asarray(record['accepted_mask'],bool)
+    finite=np.isfinite(predicted).all(axis=1)
+    points=[{'x':round(float(source[i,0]),2),'y':round(float(source[i,1]),2),
+             'mx':round(float(manual[i,0]),3),'my':round(float(manual[i,1]),3),
+             'px':round(float(predicted[i,0]),3) if finite[i] else None,
+             'py':round(float(predicted[i,1]),3) if finite[i] else None,
+             'a':bool(accepted[i])} for i in range(len(source))]
+    rows=''.join('<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>'%(
+        html.escape(b['subset']),b['count'],
+        '&mdash;' if b['mean_px'] is None else '%.4f'%b['mean_px'],
+        '&mdash;' if b['median_px'] is None else '%.4f'%b['median_px'],
+        '&mdash;' if b['rms_px'] is None else '%.4f'%b['rms_px']) for b in record['statistics'])
+    source_name=html.escape(Path(record['manual']['path']).name)
+    return ('<h2>Hand-matched particle comparison</h2>'
+        '<p>Sparse particles matched by eye between the two frames, read only after the prediction '
+        'was frozen. They are a held-out reference: not detection seeds, not constraints, not '
+        'training labels, and no correction is applied to the field. Arrows share an origin, so the '
+        'gap between arrowheads is the disagreement and its direction. Source: <code>'+source_name+
+        '</code>.</p>'
+        '<figure><a href="manual_comparison.svg"><img src="manual_comparison.png" alt="hand-matched comparison"></a></figure>'
+        '<table><thead><tr><th>Subset</th><th>Count</th><th>Mean (px)</th><th>Median (px)</th>'
+        '<th>RMS (px)</th></tr></thead><tbody>'+rows+'</tbody></table>'
+        '<p class="mnote">Endpoint disagreement is the distance between the predicted and '
+        'hand-matched arrow endpoints. Manual picks carry their own picking error and sit in one '
+        'horizontal band, so this is a check, not a ground-truth error bound.</p>'
+        '<div class="mviewer"><div class="mbar">'
+        '<label>arrow magnification <input id="mgain" type="range" min="1" max="40" step="1" value="4"></label>'
+        '<span id="mgainv">4&times;</span>'
+        '<label><input id="mshowrej" type="checkbox"> show withheld points</label></div>'
+        '<canvas id="mcanvas" width="1160" height="430"></canvas>'
+        '<p class="mnote"><span style="color:'+MANUAL+'">&#9632;</span> hand-matched &nbsp; '
+        '<span style="color:'+OF+'">&#9632;</span> optical flow &nbsp; '
+        '<span style="color:#b03a3a">&#9632;</span> withheld by the screen</p></div>'
+        '<script>(function(){var P='+json.dumps(points)+';'
+        'var c=document.getElementById("mcanvas"),g=c.getContext("2d");'
+        'var sl=document.getElementById("mgain"),lab=document.getElementById("mgainv"),'
+        'rej=document.getElementById("mshowrej");'
+        'var xs=P.map(function(p){return p.x}),ys=P.map(function(p){return p.y});'
+        'var x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs),'
+        'y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);'
+        'function draw(){var k=+sl.value;lab.textContent=k+"\u00d7";'
+        'var pad=30,w=c.width-2*pad,h=c.height-2*pad;'
+        'var s=Math.min(w/Math.max(x1-x0,1),h/Math.max(y1-y0,1));'
+        'var ox=pad+(w-(x1-x0)*s)/2,oy=pad+(h-(y1-y0)*s)/2;'
+        'g.clearRect(0,0,c.width,c.height);g.lineWidth=1.1;'
+        'function arrow(px,py,dx,dy,col){var X=ox+(px-x0)*s,Y=oy+(py-y0)*s,'
+        'X2=X+dx*k*s,Y2=Y+dy*k*s;g.strokeStyle=col;g.fillStyle=col;'
+        'g.beginPath();g.moveTo(X,Y);g.lineTo(X2,Y2);g.stroke();'
+        'var a=Math.atan2(Y2-Y,X2-X),L=4.5;g.beginPath();g.moveTo(X2,Y2);'
+        'g.lineTo(X2-L*Math.cos(a-0.4),Y2-L*Math.sin(a-0.4));'
+        'g.lineTo(X2-L*Math.cos(a+0.4),Y2-L*Math.sin(a+0.4));g.closePath();g.fill();}'
+        'P.forEach(function(p){arrow(p.x,p.y,p.mx,p.my,"'+MANUAL+'");});'
+        'P.forEach(function(p){if(p.px===null)return;'
+        'if(p.a)arrow(p.x,p.y,p.px,p.py,"'+OF+'");'
+        'else if(rej.checked)arrow(p.x,p.y,p.px,p.py,"#b03a3a");});}'
+        'sl.addEventListener("input",draw);rej.addEventListener("change",draw);draw();})();</script>')
+
+
 _FIELD_ORDER = ['field_u.png', 'field_w.png']
 
 
@@ -506,11 +615,15 @@ def _extra_field_panels(directory):
     return head + figs
 
 
-def render_pair(directory,comparison=None,surface_record=None):
+def render_pair(directory,comparison=None,surface_record=None,manual_record=None):
     directory=Path(directory);r=field_export(directory);s=read(directory/'plot_samples.npz')
     surface_record=surface_reference(directory,surface_record)
     quiver(directory,r,comparison);gradients(directory,s,comparison);profiles(directory,comparison,surface_record)
     field_panels(directory,s,surface_record)
+    if manual_record is not None:
+        manual_arrows(directory,manual_record)
+        write_json(directory/'manual_comparison.json',
+                   {k:v for k,v in manual_record.items() if not isinstance(v,np.ndarray)})
     notes={'piv_comparison':comparison['summary'] if comparison else None,'ir_surface':surface_record}
     write_json(directory/'comparison_notes.json',notes)
     comparison_links=''
@@ -524,7 +637,7 @@ def render_pair(directory,comparison=None,surface_record=None):
     title=html.escape(directory.name)
     body=''.join('<figure><a href="'+f+'.svg"><img src="'+f+'.png" alt="'+f.replace('_',' ')+'"></a></figure>' for f in files)
     extra=_extra_field_panels(directory)
-    doc='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>'+title+'</title><style>body{font:17px/1.6 system-ui;margin:2rem auto;max-width:1200px;padding:0 1rem;color:#14283b}img{width:100%;height:auto}figure{margin:2rem 0}a{color:#185ea0}code{background:#eef3f6;padding:.15em}footer{border-top:1px solid #ccc;margin-top:2rem}</style><h1>'+title+'</h1><p>Image-only optical flow. Missing estimates remain missing. PIV and IR data, when available, are comparisons applied after prediction.</p><p><a href="velocity_gradients.csv">Velocity/gradient CSV</a> · <a href="velocity_gradients.mat">MATLAB field</a> · <a href="horizontal_integral.mat">Image-only MATLAB integral profiles</a> · <a href="comparison_notes.json">Comparison settings and IR record</a></p>'+comparison_links+body+extra+'<footer>Gradient colors use the 99th percentile; raw values remain in the numerical data. Click a plot to open its vector-format version.</footer></html>'
+    doc='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>'+title+'</title><style>body{font:17px/1.6 system-ui;margin:2rem auto;max-width:1200px;padding:0 1rem;color:#14283b}img{width:100%;height:auto}figure{margin:2rem 0}a{color:#185ea0}code{background:#eef3f6;padding:.15em}footer{border-top:1px solid #ccc;margin-top:2rem}.mviewer{border:1px solid #dde3ea;border-radius:8px;padding:10px 13px;margin:1.5rem 0;background:#fafcfe}.mbar{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:13px;margin-bottom:8px}.mviewer canvas{width:100%;height:auto;background:#fff;border:1px solid #e3e8ee;border-radius:6px}.mnote{font-size:13px;color:#4a5866}table{border-collapse:collapse;font-size:14px}th,td{padding:.35rem .7rem;border-bottom:1px solid #dde3ea;text-align:right}th:first-child,td:first-child{text-align:left}</style><h1>'+title+'</h1><p>Image-only optical flow. Missing estimates remain missing. PIV and IR data, when available, are comparisons applied after prediction.</p><p><a href="velocity_gradients.csv">Velocity/gradient CSV</a> · <a href="velocity_gradients.mat">MATLAB field</a> · <a href="horizontal_integral.mat">Image-only MATLAB integral profiles</a> · <a href="comparison_notes.json">Comparison settings and IR record</a></p>'+comparison_links+body+extra+manual_block(manual_record)+'<footer>Gradient colors use the 99th percentile; raw values remain in the numerical data. Click a plot to open its vector-format version.</footer></html>'
     (directory/'index.html').write_text(doc)
 
 def render_batch(output,rows):

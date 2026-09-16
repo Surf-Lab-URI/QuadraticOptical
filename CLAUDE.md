@@ -196,6 +196,36 @@ restores the record, keying off the frozen arrays it has just verified rather
 than the status string, so a refusal is recoverable. A stale `error_traceback.txt`
 is left behind and can be deleted by hand.
 
+## Hand-matched particle comparison
+
+`--manual-ptv <dir>` on `run` or `compare` adds a third held-out comparison beside
+PIV and IR, read only after the prediction is frozen. Manual picks are a
+reference, never seeds, constraints, training labels or corrections.
+
+Files are matched to a pair by the `exp_name` and `image_pair_number` stored
+**inside** each `.mat`, not by filename: the picking tool writes
+`ExpLCL_1_03-123.mat` with a hyphen where image pairs use an underscore. The
+pair's own identity comes from its frozen `input_manifest.json`, so this behaves
+the same under `run` and `compare`. A pair with no picks renders exactly as
+before; only a few pairs are ever hand-matched.
+
+`p_orig` is `[N, 2, 2]`: particle, frame (1=A, 2=B), axis (1=x, 2=y), in MATLAB
+one-based original-camera coordinates, converted to zero-based on read. The
+package's `read_mat_fields` handles both v5 and v7.3 files, including the
+dimension reversal in v7.3, and was checked to give `(N,2,2)` for all five.
+
+The endpoint disagreement is the distance between predicted and hand-matched
+arrow endpoints. Reproducing the tutorial PDF's table for pair 123 gives a
+screened median of 0.377 px against its published 0.386 px over the same 200
+picks, which confirms the coordinate convention: a one-pixel convention error
+would move the median by about a pixel.
+
+Each pair's manual section carries a static figure, the statistics table (all
+picks, screened, and a shallow subset) and a small inline canvas with an arrow
+magnification slider. The manual file's `surfa_orig` is bit-identical to
+`Surfs.surfsPIV`, and its `altmask_offset` is 10, so it agrees with the raw-frame
+extract route on where the surface is.
+
 ## Traps
 
 These cost hours if discovered by debugging rather than by being told.
