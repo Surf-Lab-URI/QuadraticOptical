@@ -210,6 +210,7 @@ h2.figs{font-size:17px;margin:1.8rem 0 .3rem;border-top:1px solid #e3e8ee;paddin
   <span><button id="fA" class="on">A</button><button id="fB">B</button></span>
   <button id="flip">flip A/B</button>
   <label><input type="checkbox" id="surf" checked> surface</label>
+  <label><input type="checkbox" id="scale" checked> scale</label>
   <span style="flex:1"></span>
   <button id="zin">+</button><button id="zout">&minus;</button><button id="reset">reset view</button>
 </div>
@@ -223,7 +224,7 @@ h2.figs{font-size:17px;margin:1.8rem 0 .3rem;border-top:1px solid #e3e8ee;paddin
 </div>
 <canvas id="c" width="1800" height="420"></canvas>
 <div class="key" id="key"></div>
-<p class="note">Drag to pan, scroll to zoom. Arrows are drawn at the chosen multiple of the true
+<p class="note">Drag to pan, scroll to zoom. The bar and right-hand ruler rescale with the zoom; the ruler reads millimetres below the top of the crop. Arrows are drawn at the chosen multiple of the true
 pixel displacement, from each vector's own origin. Withheld points are locations the conservative
 screen declined to report; they are hidden by default. Frames are embedded losslessly so individual
 particles stay sharp when flipping. __FOOT__</p>
@@ -231,7 +232,7 @@ particles stay sharp when flipping. __FOOT__</p>
 var D=__DATA__;
 var img={},ready=0,names=['A','B'];
 names.forEach(function(n){var i=new Image();i.onload=function(){ready++;draw()};i.src=D.frames[n];img[n]=i});
-var view={s:1,x:0,y:0},frame='A',gain=8,dens=1,showRej=false,showSurf=true;
+var view={s:1,x:0,y:0},frame='A',gain=8,dens=1,showRej=false,showSurf=true,showScale=true;
 var on={};Object.keys(D.layers).forEach(function(k){on[k]=D.layers[k].default_on!==false});
 var c=document.getElementById('c'),g=c.getContext('2d');
 function fit(){var s=c.width/D.width;view.s=s;view.x=0;view.y=(c.height-D.height*s)/2;}
@@ -250,6 +251,40 @@ function arrow(X,Y,DX,DY){
   g.beginPath();g.moveTo(X+DX,Y+DY);
   g.lineTo(X+DX-h*Math.cos(a-.42),Y+DY-h*Math.sin(a-.42));
   g.lineTo(X+DX-h*Math.cos(a+.42),Y+DY-h*Math.sin(a+.42));g.closePath();g.fill();
+}
+function nice(v){var p=Math.pow(10,Math.floor(Math.log10(v)));var m=v/p;
+  return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p;}
+function scalebar(){
+  g.setTransform(1,0,0,1,0,0);
+  // The canvas backing store is wider than its displayed size, so annotation
+  // sizes are set in backing-store units and scaled up to stay legible.
+  var k=c.width/1100, F=Math.round(15*k), LW=2.2*k, PAD=10*k;
+  var mmPerPx=D.DX*1000;
+  var target=c.width*0.16/view.s*mmPerPx;
+  var mm=nice(target), px=mm/mmPerPx*view.s;
+  var x0=16*k, y0=c.height-22*k;
+  g.fillStyle='rgba(0,0,0,.62)';g.fillRect(x0-PAD,y0-F-16*k,px+2*PAD,F+26*k);
+  g.strokeStyle='#fff';g.fillStyle='#fff';g.lineWidth=LW*1.4;
+  g.beginPath();g.moveTo(x0,y0);g.lineTo(x0+px,y0);
+  g.moveTo(x0,y0-6*k);g.lineTo(x0,y0+6*k);
+  g.moveTo(x0+px,y0-6*k);g.lineTo(x0+px,y0+6*k);g.stroke();
+  g.font='600 '+F+'px system-ui';g.textAlign='center';g.textBaseline='alphabetic';
+  g.fillText((mm>=1?mm+' mm':(mm*1000)+' \u00b5m'),x0+px/2,y0-9*k);
+  var rw=46*k, rx=c.width-rw;
+  var step=nice(c.height*0.20/view.s*mmPerPx), sp=step/mmPerPx*view.s;
+  g.fillStyle='rgba(0,0,0,.62)';g.fillRect(rx-6*k,6*k,rw,c.height-12*k);
+  g.strokeStyle='#fff';g.fillStyle='#fff';g.lineWidth=LW;g.textAlign='left';
+  g.beginPath();g.moveTo(rx+4*k,12*k);g.lineTo(rx+4*k,c.height-12*k);g.stroke();
+  var topMm=(0-view.y)/view.s*mmPerPx;
+  var first=Math.ceil(topMm/step)*step;
+  g.font=Math.round(F*0.82)+'px system-ui';
+  for(var v=first;;v+=step){
+    var Y=view.y+(v/mmPerPx)*view.s; if(Y>c.height-14*k)break; if(Y<16*k)continue;
+    g.beginPath();g.moveTo(rx-1*k,Y);g.lineTo(rx+9*k,Y);g.stroke();
+    g.fillText(v.toFixed(step<1?1:0),rx+13*k,Y+F*0.3);
+  }
+  g.font='600 '+Math.round(F*0.82)+'px system-ui';
+  g.fillText('mm',rx+2*k,c.height-16*k);
 }
 function draw(){
   g.setTransform(1,0,0,1,0,0);g.fillStyle='#111';g.fillRect(0,0,c.width,c.height);
@@ -273,6 +308,7 @@ function draw(){
         if(step>1&&(Math.round(v[0]/pitch)%step||Math.round(v[1]/pitch)%step))return;
         arrow(v[0],v[1],v[2]*gain,v[3]*gain);});}
   });
+  if(showScale)scalebar();
 }
 function setFrame(n){frame=n;document.getElementById('fA').className=n==='A'?'on':'';
   document.getElementById('fB').className=n==='B'?'on':'';draw();}
@@ -280,6 +316,7 @@ document.getElementById('fA').onclick=function(){setFrame('A')};
 document.getElementById('fB').onclick=function(){setFrame('B')};
 document.getElementById('flip').onclick=function(){setFrame(frame==='A'?'B':'A')};
 document.getElementById('surf').onchange=function(e){showSurf=e.target.checked;draw()};
+document.getElementById('scale').onchange=function(e){showScale=e.target.checked;draw()};
 document.getElementById('rej').onchange=function(e){showRej=e.target.checked;draw()};
 document.getElementById('gain').oninput=function(e){gain=+e.target.value;
   document.getElementById('gainv').textContent=gain+'\\u00d7';draw()};
