@@ -298,6 +298,14 @@ def parser():
     e.add_argument('--surface-exclusion-px', type=float, default=10.)
     e.add_argument('--dx-m-per-px', type=float);e.add_argument('--dt-s', type=float)
     e.add_argument('--overwrite', action='store_true')
+    w = sub.add_parser('viewer', help='Build a self-contained browser viewer for a completed pair.')
+    w.add_argument('directory', help='a completed pair output directory')
+    w.add_argument('--output', help='HTML path (default viewer.html inside the pair directory)')
+    w.add_argument('--piv', help='supplied PIV MAT to overlay; omit to leave that layer out')
+    w.add_argument('--manual-ptv', help='directory of hand-matched particle .mat files')
+    w.add_argument('--piv-stride', type=int, default=4, help='decimate native PIV before embedding (default 4)')
+    w.add_argument('--depth-m', type=float, help='crop depth below the surface (default: the run\'s requested depth)')
+    w.add_argument('--margin-px', type=float, default=24., help='headroom above the highest surface point')
     m = sub.add_parser('demo', help='Generate and process a small synthetic particle pair.')
     m.add_argument('--output', required=True);m.add_argument('--generate-only', action='store_true');m.add_argument('--workers', type=int, default=1)
     return p
@@ -318,6 +326,15 @@ def main(argv=None):
             return 0
         if args.command == 'run':return run_batch(args)
         if args.command == 'compare':return compare_existing(args)
+        if args.command == 'viewer':
+            from .viewer import build
+            record = build(args.directory, args.output, args.piv, args.manual_ptv,
+                           args.piv_stride, args.depth_m, args.margin_px)
+            print('Viewer: %s  (%.1f MB, rows %d-%d, %s)'
+                  % (record['path'], record['bytes']/1e6, record['crop_rows'][0], record['crop_rows'][1],
+                     ', '.join('%s %d' % kv for kv in record['layers'].items()) or 'no vector layers'),
+                  flush=True)
+            return 0
         if args.command == 'extract':
             from .extract import extract, discover_raw
             pairs = args.pair

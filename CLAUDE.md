@@ -226,6 +226,32 @@ magnification slider. The manual file's `surfa_orig` is bit-identical to
 `Surfs.surfsPIV`, and its `altmask_offset` is 10, so it agrees with the raw-frame
 extract route on where the surface is.
 
+## Field viewer (`viewer`)
+
+`quadratic-optical viewer <pair dir>` writes one self-contained HTML page: the
+particle frames with vector layers drawn over them, an A/B flip, zoom and pan,
+and sliders for arrow length and density. No external dependencies and nothing
+fetched at open time, so it can be copied or emailed and still work.
+
+Layers are whatever that pair has. The image-only field is always present;
+`--piv` adds the supplied field, decimated by `--piv-stride` (default 4) before
+embedding; `--manual-ptv` adds hand-matched picks where they exist. Controls list
+only what is present, so the 58 pairs with no manual picks still get images plus
+optical flow plus PIV, which is most of the value.
+
+Frames are embedded as **lossless PNG**, deliberately. The whole purpose is to
+flip A/B and judge by eye whether the arrows match the particles that moved, and
+lossy compression smears exactly the specks being judged. Size is kept down by
+cropping instead: a margin above the highest surface point down to the requested
+depth below the lowest. For a 2048-wide frame that is about 430 rows rather than
+2048, and a page with all three layers lands near 1.9 MB.
+
+Verified in a browser rather than assumed: all three layers draw over the
+particles, zoom resolves individual specks, the density and length sliders and
+layer toggles work, the A/B flip changes the image, and the console is clean.
+Note the browser pane cannot open `file://` URLs; serve the directory over
+localhost to check a page.
+
 ## Traps
 
 These cost hours if discovered by debugging rather than by being told.
