@@ -20,6 +20,13 @@ from .matio import read_native_piv
 SURFACE_MARGIN_PX = 24.     # headroom above the highest surface point, for wave crests
 PIV_STRIDE = 4              # native PIV is 4 px; decimate before embedding
 
+# Report figures, in reading order, appended below the interactive canvas.
+FIGURE_ORDER = ['quiver', 'gradient_comparison', 'gradients', 'profiles', 'manual_comparison',
+                'field_u', 'field_u_z', 'field_w', 'field_w_z',
+                'field_u_smooth40px', 'field_u_smooth40px_z',
+                'field_w_smooth40px', 'field_w_smooth40px_z',
+                'field_dudx_from_smooth40px', 'field_dudx_from_smooth40px_z']
+
 
 def _png_data_uri(values):
     """Lossless 8-bit PNG as a data URI."""
@@ -139,6 +146,40 @@ def collect(directory, piv_path=None, manual_directory=None, piv_stride=PIV_STRI
             'layers': layers}
 
 
+def report_figures(directory, embed=False):
+    """The pair's own report figures, in reading order, as HTML.
+
+    Linked relatively by default: they already sit beside the page, so this costs
+    nothing and keeps the viewer small. ``embed`` inlines them instead, for a page
+    that must survive being moved on its own, at several megabytes a pair.
+    """
+    directory = Path(directory)
+    found = sorted(p.name for p in directory.glob('*.png') if p.stem != 'viewer')
+    def rank(name):
+        stem = name[:-4]
+        if stem in FIGURE_ORDER:
+            return (FIGURE_ORDER.index(stem), name)
+        return (len(FIGURE_ORDER), name)
+    found.sort(key=rank)
+    if not found:
+        return ''
+    pieces = []
+    for name in found:
+        stem = name[:-4]
+        if embed:
+            source = _png_data_uri(np.asarray(Image.open(directory/name).convert('L')))
+            inner = '<img src="'+source+'" alt="'+html.escape(stem.replace('_', ' '))+'">'
+        else:
+            inner = '<img loading="lazy" src="'+name+'" alt="'+html.escape(stem.replace('_', ' '))+'">'
+            if (directory/(stem+'.svg')).is_file():
+                inner = '<a href="'+stem+'.svg">'+inner+'</a>'
+        pieces.append('<figure><figcaption><code>'+html.escape(name)+'</code></figcaption>'+inner+'</figure>')
+    note = ('' if embed else '<p class="note">Figures are linked from this pair\'s own directory '
+            'rather than embedded, so the page stays small. Move the page on its own and these '
+            'become blank; the interactive view above is self-contained either way.</p>')
+    return ('<h2 class="figs">Report figures</h2>'+note+'<div class="figures">'+''.join(pieces)+'</div>')
+
+
 _PAGE = """<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width"><title>__TITLE__</title><style>
 body{font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1e2530;margin:1.2rem auto;
@@ -157,6 +198,10 @@ canvas.drag{cursor:grabbing}
 .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:4px}
 .note{font-size:12.5px;color:#5a6775;border-top:1px solid #e3e8ee;margin-top:1rem;padding-top:.7rem}
 code{background:#eef3f6;padding:.1em .3em;border-radius:3px}
+h2.figs{font-size:17px;margin:1.8rem 0 .3rem;border-top:1px solid #e3e8ee;padding-top:1.2rem}
+.figures figure{margin:1.4rem 0}
+.figures img{width:100%;height:auto;border:1px solid #e3e8ee;border-radius:6px;display:block}
+.figures figcaption{font-size:12px;color:#5a6775;margin-bottom:.3rem}
 </style>
 <h1>__TITLE__</h1>
 <p class="sub">__SUBTITLE__</p>
@@ -261,11 +306,14 @@ window.addEventListener('keydown',function(e){
   if(e.key==='b'||e.key==='B')setFrame('B');
   if(e.key===' '){e.preventDefault();setFrame(frame==='A'?'B':'A');}});
 bar();fit();draw();
-</script></html>"""
+</script>
+__FIGURES__
+</html>"""
 
 
 def build(directory, output=None, piv_path=None, manual_directory=None,
-          piv_stride=PIV_STRIDE, depth_m=None, margin=SURFACE_MARGIN_PX):
+          piv_stride=PIV_STRIDE, depth_m=None, margin=SURFACE_MARGIN_PX,
+          embed_figures=False):
     """Write one self-contained viewer page for a completed pair."""
     directory = Path(directory)
     data = collect(directory, piv_path, manual_directory, piv_stride, depth_m, margin)
@@ -278,12 +326,15 @@ def build(directory, output=None, piv_path=None, manual_directory=None,
     foot = ('Keys: <code>A</code>/<code>B</code> select a frame, <code>space</code> flips. '
             'Supplied PIV and hand-matched picks are comparisons read after the prediction was '
             'frozen; neither constrains the field.')
+    figures = report_figures(directory, embed_figures)
     page = (_PAGE.replace('__TITLE__', html.escape(data['pair']+' — field viewer'))
+                 .replace('__FIGURES__', figures)
                  .replace('__SUBTITLE__', subtitle).replace('__FOOT__', foot)
                  .replace('__DATA__', json.dumps(data, separators=(',', ':'))))
     output.write_text(page, encoding='utf8')
     return {'path': str(output), 'bytes': output.stat().st_size,
             'crop_rows': [data['crop_top'], data['crop_bottom']],
+            'figures': figures.count('<figure>'),
             'layers': {k: len(v['vectors']) for k, v in data['layers'].items()}}
 
 
@@ -313,7 +364,7 @@ between arrowheads is the disagreement.</p></html>"""
 
 
 def build_all(root, piv_directory=None, manual_directory=None, piv_stride=PIV_STRIDE,
-              depth_m=None, margin=SURFACE_MARGIN_PX, progress=print):
+              depth_m=None, margin=SURFACE_MARGIN_PX, progress=print, embed_figures=False):
     """A viewer for every completed pair under a batch root, plus an index page."""
     root = Path(root)
     pairs = sorted(d for d in root.iterdir()
@@ -326,7 +377,8 @@ def build_all(root, piv_directory=None, manual_directory=None, piv_stride=PIV_ST
         if piv_directory:
             candidate = Path(piv_directory)/(directory.name+'_PIV.mat')
             piv = candidate if candidate.is_file() else None
-        record = build(directory, None, piv, manual_directory, piv_stride, depth_m, margin)
+        record = build(directory, None, piv, manual_directory, piv_stride, depth_m, margin,
+                       embed_figures)
         layers = record['layers']
         rows.append((directory.name, layers, record['bytes']))
         progress('  %-22s %.1f MB  %s' % (directory.name, record['bytes']/1e6,

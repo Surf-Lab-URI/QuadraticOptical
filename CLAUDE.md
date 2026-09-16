@@ -247,6 +247,15 @@ its direction. It costs one extra evaluator call and a couple of hundred vectors
 When it is present the dense grid starts hidden, so the page opens on the
 comparison rather than a wash of arrows.
 
+Each page also carries that pair's report figures below the interactive view, in
+reading order: quiver, gradients, profiles, the hand-matched comparison, then the
+velocity and gradient panels with each depth panel beside its height twin. They
+are **linked** from the pair's own directory rather than embedded, which costs
+essentially nothing (1.94 to 1.95 MB) where embedding would add several megabytes
+a pair. The trade is that a page moved on its own shows blank figures; the
+interactive view is self-contained either way, and `--embed-figures` inlines them
+for a page that must travel alone.
+
 `viewer --all <batch root>` builds a page per pair plus a `viewers.html` index
 listing each pair's layers and size. There is no multi-pair page: at about 1.9 MB
 each, five pairs would already be 10 MB and all 61 would be 118 MB.

@@ -309,6 +309,8 @@ def parser():
     w.add_argument('--all', action='store_true', help='treat the directory as a batch root: build a '
                    'viewer for every completed pair and an index page linking them')
     w.add_argument('--piv-dir', help='with --all, folder holding NAME_PIV.mat companions')
+    w.add_argument('--embed-figures', action='store_true', help='inline the report figures instead of '
+                   'linking them, for a page that must survive being moved on its own')
     m = sub.add_parser('demo', help='Generate and process a small synthetic particle pair.')
     m.add_argument('--output', required=True);m.add_argument('--generate-only', action='store_true');m.add_argument('--workers', type=int, default=1)
     return p
@@ -333,12 +335,13 @@ def main(argv=None):
             from .viewer import build, build_all
             if args.all:
                 record = build_all(args.directory, args.piv_dir, args.manual_ptv,
-                                   args.piv_stride, args.depth_m, args.margin_px)
+                                   args.piv_stride, args.depth_m, args.margin_px,
+                                   embed_figures=args.embed_figures)
                 print('\nIndex: %s  (%d pairs, %.0f MB total)'
                       % (record['index'], record['pairs'], record['bytes']/1e6), flush=True)
                 return 0
             record = build(args.directory, args.output, args.piv, args.manual_ptv,
-                           args.piv_stride, args.depth_m, args.margin_px)
+                           args.piv_stride, args.depth_m, args.margin_px, args.embed_figures)
             print('Viewer: %s  (%.1f MB, rows %d-%d, %s)'
                   % (record['path'], record['bytes']/1e6, record['crop_rows'][0], record['crop_rows'][1],
                      ', '.join('%s %d' % kv for kv in record['layers'].items()) or 'no vector layers'),
