@@ -90,3 +90,22 @@ class IntensityScaleTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReportingGridReachTests(unittest.TestCase):
+    """A lowered floor must reach the saved grid, not just the acceptance test.
+
+    finalize selects which fitting nodes to evaluate before acceptance runs, so a
+    hard-coded floor there silently discards every shallow node however the
+    acceptance threshold is configured. That is what happened: a sweep down to
+    3 px produced a fitting grid reaching 3.03 px and a reported grid that still
+    stopped at 12, with nothing raising.
+    """
+    def test_selection_uses_the_configured_floor(self):
+        import inspect
+        from quadratic_optical.core import finalize_fields
+        source = inspect.getsource(finalize_fields.run)
+        self.assertIn('depth >= evaluator.min_depth', source,
+                      'the reporting grid must select on the configured floor')
+        self.assertNotIn('depth >= 12', source,
+                         'a hard-coded reporting floor makes min_depth_px inert')

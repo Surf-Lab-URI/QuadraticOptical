@@ -309,7 +309,9 @@ def run(directory, requested_depth_m=.01, batch_size=4096):
     evaluator = ConservativeEvaluator(directory, requested_depth_m=requested_depth_m, batch_size=batch_size)
     inp = evaluator.inputs
     depth = inp['points'][:, 1]-np.interp(inp['points'][:, 0], evaluator.surface_x, inp['surface_a'])
-    selected = (depth >= 12) & (depth <= evaluator.max_depth_px+1e-9)
+    # The reporting grid must reach as shallow as acceptance will allow, or a
+    # lowered floor is inert: nothing below this is ever evaluated or saved.
+    selected = (depth >= evaluator.min_depth) & (depth <= evaluator.max_depth_px+1e-9)
     q = inp['points'][selected]
     result = evaluator.evaluate_conservative(q)
     n = len(q); accepted = result['accepted']; gx = result['gradient_accepted_xx']; gy = result['gradient_accepted_yy']
