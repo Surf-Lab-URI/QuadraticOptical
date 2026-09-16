@@ -236,8 +236,20 @@ fetched at open time, so it can be copied or emailed and still work.
 Layers are whatever that pair has. The image-only field is always present;
 `--piv` adds the supplied field, decimated by `--piv-stride` (default 4) before
 embedding; `--manual-ptv` adds hand-matched picks where they exist. Controls list
-only what is present, so the 58 pairs with no manual picks still get images plus
-optical flow plus PIV, which is most of the value.
+only what is present, so pairs with no manual picks still get images plus optical
+flow plus PIV, which is most of the value.
+
+Where manual picks exist there is a fourth layer, **optical flow evaluated at the
+pick positions themselves**. The fitting grid never lands on a hand-picked
+particle, so a nearby grid arrow is not the same measurement; this layer shares an
+origin with each pick, which makes the gap between arrowheads the disagreement and
+its direction. It costs one extra evaluator call and a couple of hundred vectors.
+When it is present the dense grid starts hidden, so the page opens on the
+comparison rather than a wash of arrows.
+
+`viewer --all <batch root>` builds a page per pair plus a `viewers.html` index
+listing each pair's layers and size. There is no multi-pair page: at about 1.9 MB
+each, five pairs would already be 10 MB and all 61 would be 118 MB.
 
 Frames are embedded as **lossless PNG**, deliberately. The whole purpose is to
 flip A/B and judge by eye whether the arrows match the particles that moved, and

@@ -66,7 +66,8 @@ def collect(directory, piv_path=None, manual_directory=None, piv_stride=PIV_STRI
     disp = np.asarray(frozen['disp'], float)
     accepted = np.asarray(frozen['accepted'], bool)
     inside = (query[:, 1] >= top) & (query[:, 1] < bottom) & np.isfinite(disp).all(axis=1)
-    layers['of'] = {'label': 'Image-only optical flow', 'colour': '#d54b28',
+    layers['of'] = {'label': 'Image-only optical flow (fitting grid)', 'colour': '#d54b28',
+                    'default_on': True,
                     'vectors': _vectors(query[:, 0], query[:, 1]-top, disp[:, 0], disp[:, 1],
                                         inside & accepted),
                     'withheld': _vectors(query[:, 0], query[:, 1]-top, disp[:, 0], disp[:, 1],
@@ -87,6 +88,7 @@ def collect(directory, piv_path=None, manual_directory=None, piv_stride=PIV_STRI
             good &= np.asarray(mask)[np.ix_(rows, cols)].astype(bool)
         good &= (grid_y >= top) & (grid_y < bottom)
         layers['piv'] = {'label': 'Supplied PIV (every %d node)' % step, 'colour': '#2363b1',
+                         'default_on': True,
                          'vectors': _vectors(grid_x.ravel(), grid_y.ravel()-top,
                                              sub[..., 0].ravel(), sub[..., 1].ravel(), good.ravel()),
                          'withheld': [], 'spacing_px': float(np.diff(px)[0]*step) if len(px) > 1 else 4.*step}
@@ -100,9 +102,31 @@ def collect(directory, piv_path=None, manual_directory=None, piv_stride=PIV_STRI
             source = record['source_px']-origin; move = record['displacement_px']
             keep = (source[:, 1] >= top) & (source[:, 1] < bottom)
             layers['manual'] = {'label': 'Hand-matched (%d)' % int(keep.sum()), 'colour': '#17806d',
+                                'default_on': True,
                                 'vectors': _vectors(source[:, 0], source[:, 1]-top,
                                                     move[:, 0], move[:, 1], keep),
                                 'withheld': [], 'spacing_px': 0.}
+            # The fitting grid never lands on a hand-picked particle, so a grid
+            # arrow near a manual arrow is not the same measurement. Evaluate the
+            # frozen field at the pick positions themselves for a true
+            # one-to-one comparison: shared origin, so the gap between arrowheads
+            # is the disagreement and its direction.
+            from .manual import compare_manual
+            paired = compare_manual(directory, record)
+            predicted = np.asarray(paired['predicted_disp_px'], float)
+            passed = np.asarray(paired['accepted_mask'], bool)
+            usable = keep & np.isfinite(predicted).all(axis=1)
+            layers['of_at_manual'] = {
+                'label': 'Optical flow at those exact points (%d)' % int((usable & passed).sum()),
+                'colour': '#d54b28', 'default_on': True, 'paired_with': 'manual',
+                'vectors': _vectors(source[:, 0], source[:, 1]-top,
+                                    predicted[:, 0], predicted[:, 1], usable & passed),
+                'withheld': _vectors(source[:, 0], source[:, 1]-top,
+                                     predicted[:, 0], predicted[:, 1], usable & ~passed),
+                'spacing_px': 0.}
+            # With a true one-to-one layer present, the dense grid starts hidden so
+            # the first view is the comparison rather than a wash of arrows.
+            layers['of']['default_on'] = False
 
     columns = np.arange(width)
     return {'pair': directory.name, 'width': int(width), 'height': int(bottom-top),
@@ -163,7 +187,7 @@ var D=__DATA__;
 var img={},ready=0,names=['A','B'];
 names.forEach(function(n){var i=new Image();i.onload=function(){ready++;draw()};i.src=D.frames[n];img[n]=i});
 var view={s:1,x:0,y:0},frame='A',gain=8,dens=1,showRej=false,showSurf=true;
-var on={};Object.keys(D.layers).forEach(function(k){on[k]=true});
+var on={};Object.keys(D.layers).forEach(function(k){on[k]=D.layers[k].default_on!==false});
 var c=document.getElementById('c'),g=c.getContext('2d');
 function fit(){var s=c.width/D.width;view.s=s;view.x=0;view.y=(c.height-D.height*s)/2;}
 function bar(){
@@ -261,3 +285,65 @@ def build(directory, output=None, piv_path=None, manual_directory=None,
     return {'path': str(output), 'bytes': output.stat().st_size,
             'crop_rows': [data['crop_top'], data['crop_bottom']],
             'layers': {k: len(v['vectors']) for k, v in data['layers'].items()}}
+
+
+_INDEX = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width"><title>__TITLE__</title><style>
+body{font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1e2530;margin:2rem auto;
+ max-width:1000px;padding:0 1rem}
+h1{font-size:20px;margin:0 0 .3rem}
+p.sub{color:#5a6775;font-size:13px;margin:0 0 1.2rem}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:.45rem .7rem;border-bottom:1px solid #e3e8ee;text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:#2b3542;font-weight:600;border-bottom:1px solid #cfd6e0}
+a{color:#185ea0;text-decoration:none}a:hover{text-decoration:underline}
+tr:hover{background:#f7f9fc}
+.note{font-size:12.5px;color:#5a6775;border-top:1px solid #e3e8ee;margin-top:1.4rem;padding-top:.7rem}
+.y{color:#17806d}.n{color:#b9c2cc}
+</style>
+<h1>__TITLE__</h1>
+<p class="sub">__SUBTITLE__</p>
+<table><thead><tr><th>Pair</th><th>Optical flow</th><th>PIV</th><th>Hand-matched</th>
+<th>One-to-one</th><th>Size</th></tr></thead><tbody>__ROWS__</tbody></table>
+<p class="note">Each page is self-contained: the particle frames with their vector layers, an A/B
+flip, zoom and pan, and sliders for arrow length and density. Where hand-matched picks exist the
+field is also evaluated at those exact positions, so prediction and pick share an origin and the gap
+between arrowheads is the disagreement.</p></html>"""
+
+
+def build_all(root, piv_directory=None, manual_directory=None, piv_stride=PIV_STRIDE,
+              depth_m=None, margin=SURFACE_MARGIN_PX, progress=print):
+    """A viewer for every completed pair under a batch root, plus an index page."""
+    root = Path(root)
+    pairs = sorted(d for d in root.iterdir()
+                   if d.is_dir() and (d/'results.npz').is_file() and (d/'inputs.npz').is_file())
+    if not pairs:
+        raise ValueError('No completed pair directories under '+str(root))
+    rows = []
+    for directory in pairs:
+        piv = None
+        if piv_directory:
+            candidate = Path(piv_directory)/(directory.name+'_PIV.mat')
+            piv = candidate if candidate.is_file() else None
+        record = build(directory, None, piv, manual_directory, piv_stride, depth_m, margin)
+        layers = record['layers']
+        rows.append((directory.name, layers, record['bytes']))
+        progress('  %-22s %.1f MB  %s' % (directory.name, record['bytes']/1e6,
+                 ', '.join('%s %d' % kv for kv in layers.items())))
+    def cell(layers, key):
+        count = layers.get(key)
+        return ('<td class="y">%d</td>' % count) if count else '<td class="n">&mdash;</td>'
+    body = ''.join('<tr><td><a href="%s/viewer.html">%s</a></td>%s%s%s%s<td>%.1f MB</td></tr>'
+                   % (html.escape(name), html.escape(name), cell(layers, 'of'), cell(layers, 'piv'),
+                      cell(layers, 'manual'), cell(layers, 'of_at_manual'), size/1e6)
+                   for name, layers, size in rows)
+    total = sum(size for _, _, size in rows)
+    with_manual = sum(1 for _, layers, _ in rows if layers.get('manual'))
+    page = (_INDEX.replace('__TITLE__', html.escape(root.name+' — field viewers'))
+                  .replace('__SUBTITLE__', '%d pairs, %.0f MB total, %d with hand-matched picks'
+                           % (len(rows), total/1e6, with_manual))
+                  .replace('__ROWS__', body))
+    index = root/'viewers.html'
+    index.write_text(page, encoding='utf8')
+    return {'index': str(index), 'pairs': len(rows), 'bytes': total}

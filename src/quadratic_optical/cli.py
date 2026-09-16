@@ -306,6 +306,9 @@ def parser():
     w.add_argument('--piv-stride', type=int, default=4, help='decimate native PIV before embedding (default 4)')
     w.add_argument('--depth-m', type=float, help='crop depth below the surface (default: the run\'s requested depth)')
     w.add_argument('--margin-px', type=float, default=24., help='headroom above the highest surface point')
+    w.add_argument('--all', action='store_true', help='treat the directory as a batch root: build a '
+                   'viewer for every completed pair and an index page linking them')
+    w.add_argument('--piv-dir', help='with --all, folder holding NAME_PIV.mat companions')
     m = sub.add_parser('demo', help='Generate and process a small synthetic particle pair.')
     m.add_argument('--output', required=True);m.add_argument('--generate-only', action='store_true');m.add_argument('--workers', type=int, default=1)
     return p
@@ -327,7 +330,13 @@ def main(argv=None):
         if args.command == 'run':return run_batch(args)
         if args.command == 'compare':return compare_existing(args)
         if args.command == 'viewer':
-            from .viewer import build
+            from .viewer import build, build_all
+            if args.all:
+                record = build_all(args.directory, args.piv_dir, args.manual_ptv,
+                                   args.piv_stride, args.depth_m, args.margin_px)
+                print('\nIndex: %s  (%d pairs, %.0f MB total)'
+                      % (record['index'], record['pairs'], record['bytes']/1e6), flush=True)
+                return 0
             record = build(args.directory, args.output, args.piv, args.manual_ptv,
                            args.piv_stride, args.depth_m, args.margin_px)
             print('Viewer: %s  (%.1f MB, rows %d-%d, %s)'
