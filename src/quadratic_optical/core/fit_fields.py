@@ -103,6 +103,10 @@ def inputs_from(path):
     # Select only fields required for image fitting. No manual data is read.
     keys = ['A', 'B', 'rawA', 'rawB', 'va', 'vb', 'availability_a',
             'availability_b', 'surface_a', 'surface_b', 'points', 'origin0']
+    # Optional: present only in inputs written after these became configurable.
+    # Without copying them, base_margin and base_floor silently take the old
+    # defaults and a margin alternative stops matching the primary's model family.
+    optional = ['surface_exclusion_px', 'contrast_floor', 'intensity_scale']
     with np.load(path, allow_pickle=False) as z:
         missing = [k for k in keys if k not in z.files]
         if missing:
@@ -112,6 +116,7 @@ def inputs_from(path):
         marker.update({k: None for k in forbidden_input_keys(z.files)})
         verify_image_only(marker, 'Image inputs')
         out = {k: z[k] for k in keys}
+        out.update({k: z[k] for k in optional if k in z.files})
     shape = out['A'].shape
     if len(shape) != 2 or any(out[k].shape != shape for k in
            ['B', 'rawA', 'rawB', 'va', 'vb', 'availability_a', 'availability_b']):

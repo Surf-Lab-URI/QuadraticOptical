@@ -30,10 +30,16 @@ from ._provenance import forbidden_input_keys, source_hashes, TRACKING_SOURCES
 SOLVER = Path(__file__).resolve().with_name('fit_local_cached.py')
 
 STATS = ['ncc', 'rms', 'nvalid', 'cond', 'iterations', 'mindet', 'support_fraction']
+DETECTOR_MIN_PEAK = 8.        # difference-of-Gaussians response, in sensor counts
+DETECTOR_BACKGROUND_MAX = 180.  # broad background ceiling, in sensor counts
 INPUT_KEYS = ['A', 'B', 'rawA', 'rawB', 'va', 'vb', 'surface_a', 'surface_b',
               'points', 'origin0', 'DX', 'DT', 'requested_max_depth_px',
               'fitting_max_depth_px', 'detector_max_depth_px',
               'image_only', 'supplied_velocity_used']
+# Copied when present and defaulted when absent, so archives written before these
+# existed still load. They must be listed here or load_inputs silently drops them
+# and every "if key in inp" fallback below quietly takes the default instead.
+OPTIONAL_INPUT_KEYS = ['intensity_scale', 'detector_min_depth_px']
 SETTINGS = dict(image_only=True, previous_fields_or_tracks_used=False,
     velocity_inputs_allowed=False, search_radius_primary=64,
     search_radius_sensitivity=48, search_axes='dx and dy symmetric',
@@ -90,6 +96,7 @@ def load_inputs(path):
         missing=[k for k in INPUT_KEYS if k not in z.files]
         if missing: raise ValueError('Missing image-only input keys: '+', '.join(missing))
         inp={k:z[k] for k in INPUT_KEYS}
+        inp.update({k:z[k] for k in OPTIONAL_INPUT_KEYS if k in z.files})
         if not bool(inp['image_only']) or bool(inp['supplied_velocity_used']):
             raise ValueError('Input provenance must affirm image_only and no supplied velocity use.')
     return inp
@@ -162,6 +169,13 @@ class ImageOnlyTracker:
         for k in INPUT_KEYS: setattr(self,k,inp[k])
         # Optional so inputs written before this was configurable still load.
         self.detector_min_depth_px=float(inp['detector_min_depth_px']) if 'detector_min_depth_px' in inp else 14.
+        # The detector tests hp and background in converted brightness units, so its
+        # two thresholds mean what they say only when one converted unit is one
+        # sensor count. Scaling them keeps their meaning in sensor counts at any
+        # conversion, and leaves them untouched at the historical scale of 1.
+        self.intensity_scale=float(inp['intensity_scale']) if 'intensity_scale' in inp else 1.
+        self.detector_min_peak=DETECTOR_MIN_PEAK*self.intensity_scale
+        self.detector_background_max=DETECTOR_BACKGROUND_MAX*self.intensity_scale
         shape=self.A.shape
         assert len(shape)==2
         for k in ['B','rawA','rawB','va','vb']: assert getattr(self,k).shape==shape
@@ -285,9 +299,9 @@ class ImageOnlyTracker:
         hp=gaussian_filter(self.rawA,.6)-gaussian_filter(self.rawA,2)
         background=gaussian_filter(self.rawA,5);yy,xx=np.indices(self.rawA.shape)
         depth=yy-self.surface_a[None]
-        det=((hp==maximum_filter(hp,size=5))&(hp>8)&(xx>=4)&(xx<self.rawA.shape[1]-4)&
+        det=((hp==maximum_filter(hp,size=5))&(hp>self.detector_min_peak)&(xx>=4)&(xx<self.rawA.shape[1]-4)&
              (yy>=4)&(yy<self.rawA.shape[0]-4)&(depth>=self.detector_min_depth_px)&
-             (depth<=float(self.detector_max_depth_px))&self.va&(background<180))
+             (depth<=float(self.detector_max_depth_px))&self.va&(background<self.detector_background_max))
         return dict(points=np.c_[xx[det],yy[det]].astype(float),strength=hp[det])
 
 
@@ -324,6 +338,7 @@ class Runner:
             fitting_max_depth_px=float(inp['fitting_max_depth_px']),
             detector_max_depth_px=float(inp['detector_max_depth_px']),
             detector_min_depth_px=float(inp['detector_min_depth_px']) if 'detector_min_depth_px' in inp else 14.,
+            intensity_scale=float(inp['intensity_scale']) if 'intensity_scale' in inp else 1.,
             chunk_size=args.chunk_size)
         self.coarse_signature=hashlib.sha256(json.dumps(self.identity,sort_keys=True).encode()).hexdigest()
         self.signature=hashlib.sha256((self.coarse_signature+str(args.bootstrap_radius)).encode()).hexdigest()

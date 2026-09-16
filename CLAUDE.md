@@ -303,6 +303,39 @@ layer toggles work, the A/B flip changes the image, and the console is clean.
 Note the browser pane cannot open `file://` URLs; serve the directory over
 localhost to check a page.
 
+## Intensity-scale dependence
+
+Thresholds in brightness units only mean what they say when one converted unit is
+one sensor count, which was always true while `intensity_scale` was 1.0. With
+12-bit frames mapped down (`255/1023 = 0.2493`) every converted intensity is a
+quarter, and such a threshold silently becomes four times stricter or looser.
+
+Scaled with the conversion: `prepare.contrast_floor(scale) = 25*scale**2`, and
+`DETECTOR_MIN_PEAK` (8) and `DETECTOR_BACKGROUND_MAX` (180) in `tracking.py`. All
+are unchanged at scale 1.0.
+
+**The trap that actually bit.** These values travel in `inputs.npz`, but both
+loaders copy a **whitelist**: `tracking.load_inputs` uses `INPUT_KEYS` and
+`fit_fields.inputs_from` its own `keys`. A key written by `prepare` but absent
+from the whitelist is silently dropped, so every `if key in inputs` fallback takes
+its default and the fix is inert while looking correct. That is exactly what
+happened: the detector scaling was written properly and did nothing, and a
+clip-1023 experiment lost 32% of its particle candidates and read 5% worse, which
+would have been reported as a result about dynamic range. Optional keys now live
+in `OPTIONAL_INPUT_KEYS` / `optional` and are copied when present.
+
+`tests/test_intensity_scale.py` guards this by asserting the value that reaches
+the tracker and the fitter, not the arithmetic. Removing the whitelist line makes
+two of them fail, which was checked. A test of the scaling arithmetic alone would
+have passed throughout.
+
+An audit of all five numerical modules confirmed only these, refuted two, and
+cleared 74 other constants: correlations, fractions, pixel distances,
+determinants and anything computed from `normalize()`'s already contrast-normalised
+output are dimensionless and must NOT be scaled. The one remaining dimensionful
+literal is the `1e-10` NCC denominator guard in `tracking.py`, set far below any
+real value and harmless.
+
 ## Traps
 
 These cost hours if discovered by debugging rather than by being told.
