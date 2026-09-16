@@ -166,10 +166,21 @@ def compare_existing(args):
         write_json(directory/'comparison_status.json',dict(status='complete',quality=args.quality,
             PIV_used_in_prediction=False,refitting_performed=False,surface_record=surface_record))
         status_path=directory/'status.json'
+        summary_path=directory/'summary.json'
         if status_path.exists():
             status=json.loads(status_path.read_text())
-            if status.get('prediction_status')=='complete' and status.get('stage') in ['comparison','reporting','complete']:
-                status.update(status='complete',stage='complete',PIV_comparison=True,piv_quality=args.quality,
+            # compare_pair has just required every frozen prediction array and
+            # checked their hashes before and after, so the prediction here is
+            # complete whatever the status record happens to say. Trusting that
+            # record instead would leave a pair permanently marked failed after a
+            # later run was refused against an older output directory: the refusal
+            # overwrites stage and prediction_status, and nothing could then put
+            # them back. Evidence from the artifacts is the sounder test.
+            if summary_path.exists():
+                status.update(status='complete',stage='complete',prediction_status='complete',
+                              PIV_used_in_prediction=False,image_only=True,
+                              prediction_summary=json.loads(summary_path.read_text()),
+                              PIV_comparison=True,piv_quality=args.quality,
                               surface_record=surface_record)
                 for key in ['error','error_type','report_error']:status.pop(key,None)
                 write_json(status_path,status)

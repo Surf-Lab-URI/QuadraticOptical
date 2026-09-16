@@ -178,6 +178,24 @@ floor: measured median local contrast falls from 22.8 (4.6x the floor) to 3.7
 functionally identical but NOT textually identical. Change both or the margin
 alternatives silently stop being the same model family.
 
+## Re-running against an output directory built by older code
+
+`prepare`'s plan includes `implementation_sha256`, the hash of `prepare.py`
+itself, so **editing that file invalidates every existing output directory for
+re-running**. That is deliberate: the code that built the inputs is part of what
+the inputs are. No configuration shim avoids it.
+
+Those directories stay valid and readable. Use `compare` to re-render one (it
+never calls `prepare`, and it regenerates the report and all field panels), or a
+fresh `--output` to recompute.
+
+Note what a refused `run` costs: it overwrites that pair's `status.json` with
+`failed` at stage `preparation`, clobbering `stage` and `prediction_status`, and
+writes `error_traceback.txt`. The results themselves are untouched. `compare`
+restores the record, keying off the frozen arrays it has just verified rather
+than the status string, so a refusal is recoverable. A stale `error_traceback.txt`
+is left behind and can be deleted by hand.
+
 ## Traps
 
 These cost hours if discovered by debugging rather than by being told.
