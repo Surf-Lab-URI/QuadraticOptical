@@ -110,8 +110,18 @@ times worse. The panels are consequently wide and short, and their colour bars
 are attached to the drawn axes rather than the subplot slot, which an
 aspect-locked axes no longer fills.
 
-Colour limits are fixed rather than per-pair percentiles, so panels from
-different pairs are directly comparable. Clipped samples are flagged magenta
+Colour limits cover each pair's own full range and clip nothing
+(`FIELD_PER_PAIR_LIMITS`). A value is read off the **isotachs**, drawn every
+`FIELD_CONTOUR_CM_S` (1 cm/s) on every velocity panel, not off the colour ramp.
+Colour is therefore NOT comparable between pairs and every panel says so on its
+face; the isotachs are absolute, so quantitative comparison between pairs survives
+through them. Within a pair the unsmoothed and smoothed views of one quantity
+share a scale so those two stay comparable. Setting `FIELD_PER_PAIR_LIMITS=False`
+restores fixed limits from `FIELD_U_RANGE`/`FIELD_W_ABS`.
+
+The reason for per-pair: across 61 pairs u spans -0.20 to +0.37 m/s, but p0.1 to
+p99.9 is only -0.003 to +0.17. One fixed full range would squeeze a typical shear
+layer into about a fifth of the ramp. Clipped samples are flagged magenta
 (below) and green (above) instead of silently saturating; grey means no accepted
 estimate. Each pair records limits, kernel and clipping fractions in
 `field_panels.json`.

@@ -25,10 +25,19 @@ OF='#d54b28';PIV='#2363b1';MANUAL='#17806d'
 # different pairs of the same experiment are directly comparable.
 FIELD_SMOOTH_PX=40.             # box filter width in image pixels
 FIELD_MIN_VALID=.5              # minimum valid fraction within the kernel
-FIELD_U_RANGE=(-.005,.12)       # m/s
-FIELD_W_ABS=.02                 # m/s, symmetric
+FIELD_PER_PAIR_LIMITS=True      # scale each pair to its own data; see below
+FIELD_U_RANGE=(-.21,.38)        # m/s, fallback fixed range when the above is False
+FIELD_W_ABS=.14                 # m/s, symmetric fallback
 FIELD_DUDX_ABS=8.               # s^-1, symmetric
-FIELD_CONTOUR_CM_S=1.           # isotach interval on the smoothed u panel; 0 disables
+FIELD_CONTOUR_CM_S=1.           # isotach interval on every velocity panel; 0 disables
+# Colour limits cover the data rather than clipping it, so a value is read off the
+# contours rather than the colour ramp. With FIELD_PER_PAIR_LIMITS each pair is
+# scaled to its own range, which keeps a quiet pair legible instead of squeezing
+# it into a corner of a range set by the liveliest one; the cost is that colour is
+# no longer comparable BETWEEN pairs. The isotachs are absolute, so quantitative
+# comparison between pairs survives through them. Every panel states its own
+# limits, and the unsmoothed and smoothed views of one quantity share a scale so
+# they stay comparable with each other.
 FIELD_BELOW='#ff00ff';FIELD_ABOVE='#39ff14';FIELD_ABSENT='#b8b8b8'
 FIELD_DATUM_FRAMES=20           # leading surface frames averaged for the still-water datum
 FIELD_SURFACE_LINE='#00e5ff'    # free-surface profile drawn on the z panels
@@ -298,8 +307,9 @@ def _field_image(directory,name,values,cmap_name,low,high,coords,title,bar,conto
             text.set_path_effects([patheffects.withStroke(linewidth=2.,foreground='black')])
     ax.set_xlabel('horizontal position x (mm)');ax.set_ylabel('depth below local surface (mm)')
     ax.set_title(title,fontsize=11,pad=20)
-    ax.text(.5,1.012,'scale %.4g to %.4g   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
-            '   |   grey = no accepted estimate'%(low,high,below,above),
+    ax.text(.5,1.012,'scale %.4g to %.4g%s   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
+            '   |   grey = no accepted estimate'%(low,high,
+            ' (this pair only)' if FIELD_PER_PAIR_LIMITS else '',below,above),
             transform=ax.transAxes,ha='center',va='bottom',fontsize=8,color='0.35')
     # An aspect-locked axes is shorter than its subplot slot, so tie the colour
     # bar to the drawn axes rather than letting it span the original height.
@@ -372,8 +382,9 @@ def _field_image_z(directory,name,values,cmap_name,low,high,grid,surface_mm,titl
     ax.set_ylim(np.nanmin(grid_z),max(np.nanmax(surface_mm),0.)+1.)
     ax.set_aspect('equal')
     ax.set_title(title,fontsize=11,pad=28)
-    ax.text(.5,1.052,'scale %.4g to %.4g   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
-            '   |   grey = no accepted estimate'%(low,high,below,above),
+    ax.text(.5,1.052,'scale %.4g to %.4g%s   |   clipped: %.2f%% below (magenta), %.2f%% above (green)'
+            '   |   grey = no accepted estimate'%(low,high,
+            ' (this pair only)' if FIELD_PER_PAIR_LIMITS else '',below,above),
             transform=ax.transAxes,ha='center',va='bottom',fontsize=8,color='0.35')
     ax.text(.5,1.012,'z = 0 at '+datum_note,transform=ax.transAxes,ha='center',va='bottom',
             fontsize=8,color='0.35')
@@ -408,23 +419,48 @@ def field_panels(directory,s,surface_record=None):
     smooth_u=_masked_box(u,accepted,cells,FIELD_MIN_VALID)
     smooth_w=_masked_box(w,accepted,cells,FIELD_MIN_VALID)
     dudx=np.gradient(smooth_u,span_x*dx,axis=1)
+    def span(*fields):
+        """Full range of this pair's own data, or the fixed fallback."""
+        if not FIELD_PER_PAIR_LIMITS:return None
+        values=np.concatenate([f[np.isfinite(f)].ravel() for f in fields]) if fields else np.array([])
+        if values.size<2:return None
+        low,high=float(values.min()),float(values.max())
+        return None if not np.isfinite([low,high]).all() or high<=low else (low,high)
+    def symmetric(*fields):
+        got=span(*fields)
+        if got is None:return None
+        reach=max(abs(got[0]),abs(got[1]))
+        return None if reach<=0 else (-reach,reach)
+    # Unsmoothed and smoothed views of one quantity share a scale, so the pair of
+    # panels stays comparable with each other even though pairs no longer are.
+    u_span=span(u,smooth_u) or FIELD_U_RANGE
+    w_span=symmetric(w,smooth_w) or (-FIELD_W_ABS,FIELD_W_ABS)
+    g_span=symmetric(dudx) or (-FIELD_DUDX_ABS,FIELD_DUDX_ABS)
     step=FIELD_CONTOUR_CM_S/100.
-    levels=np.arange(step,FIELD_U_RANGE[1]+step/2,step) if FIELD_CONTOUR_CM_S>0 else np.array([])
+    def isotachs(low,high):
+        """Every multiple of the interval inside the range, without the zero line.
+        Zero is omitted because in the deep water it traces the noise floor and
+        produces a dense tangle that hides the levels worth reading."""
+        if FIELD_CONTOUR_CM_S<=0:return np.array([])
+        first=int(np.ceil(low/step));last=int(np.floor(high/step))
+        return np.array([k*step for k in range(first,last+1) if k!=0])
+    levels=isotachs(*u_span)
+    w_levels=isotachs(*w_span)
     coords=(x*dx*1000.,z*dx*1000.)
     tag='%gpx'%FIELD_SMOOTH_PX
     name=Path(directory).name
     contour_note='   (contours every %g cm/s)'%FIELD_CONTOUR_CM_S if len(levels) else ''
-    jobs=[('field_u',u,'magma',FIELD_U_RANGE[0],FIELD_U_RANGE[1],
-           name+'   horizontal velocity u  (unsmoothed)','u  (m s$^{-1}$)',None),
-          ('field_w',w,'RdBu_r',-FIELD_W_ABS,FIELD_W_ABS,
-           name+'   vertical velocity w, positive up  (unsmoothed)','w  (m s$^{-1}$)',None),
-          ('field_u_smooth'+tag,smooth_u,'magma',FIELD_U_RANGE[0],FIELD_U_RANGE[1],
+    jobs=[('field_u',u,'magma',u_span[0],u_span[1],
+           name+'   horizontal velocity u  (unsmoothed)'+contour_note,'u  (m s$^{-1}$)',levels),
+          ('field_w',w,'RdBu_r',w_span[0],w_span[1],
+           name+'   vertical velocity w, positive up  (unsmoothed)'+contour_note,'w  (m s$^{-1}$)',w_levels),
+          ('field_u_smooth'+tag,smooth_u,'magma',u_span[0],u_span[1],
            '%s   horizontal velocity u,  %g px smoothed%s'%(name,FIELD_SMOOTH_PX,contour_note),
            'u  (m s$^{-1}$)',levels),
-          ('field_w_smooth'+tag,smooth_w,'RdBu_r',-FIELD_W_ABS,FIELD_W_ABS,
-           '%s   vertical velocity w (positive up),  %g px smoothed'%(name,FIELD_SMOOTH_PX),
-           'w  (m s$^{-1}$)',None),
-          ('field_dudx_from_smooth'+tag,dudx,'PuOr_r',-FIELD_DUDX_ABS,FIELD_DUDX_ABS,
+          ('field_w_smooth'+tag,smooth_w,'RdBu_r',w_span[0],w_span[1],
+           '%s   vertical velocity w (positive up),  %g px smoothed%s'%(name,FIELD_SMOOTH_PX,contour_note),
+           'w  (m s$^{-1}$)',w_levels),
+          ('field_dudx_from_smooth'+tag,dudx,'PuOr_r',g_span[0],g_span[1],
            '%s   du/dx from %g px smoothed u  (finite difference)'%(name,FIELD_SMOOTH_PX),
            r'$\partial u/\partial x$  (s$^{-1}$)',levels if False else None)]
     clipping={}
@@ -454,11 +490,16 @@ def field_panels(directory,s,surface_record=None):
             'kernel_px_depth_x':[cells[0]*span_z,cells[1]*span_x],
             'grid_spacing_px':{'x':span_x,'depth':span_z},
             'minimum_valid_fraction':FIELD_MIN_VALID,
-            'colour_limits':{'u_m_per_s':list(FIELD_U_RANGE),
-                             'w_m_per_s':[-FIELD_W_ABS,FIELD_W_ABS],
-                             'dudx_per_s':[-FIELD_DUDX_ABS,FIELD_DUDX_ABS]},
+            'colour_limits':{'u_m_per_s':list(u_span),'w_m_per_s':list(w_span),
+                             'dudx_per_s':list(g_span),
+                             'per_pair':bool(FIELD_PER_PAIR_LIMITS),
+                             'note':('set from this pair alone, so colour is not comparable between '
+                                     'pairs; the isotachs are absolute and are'
+                                     if FIELD_PER_PAIR_LIMITS else
+                                     'fixed across pairs, so colour is comparable and the isotachs are')},
             'contour_interval_cm_s':FIELD_CONTOUR_CM_S,
-            'contour_levels_cm_s':[round(float(v)*100,3) for v in levels],
+            'contour_levels_cm_s':{'u':[round(float(v)*100,3) for v in levels],
+                                   'w':[round(float(v)*100,3) for v in w_levels]},
             'flag_colours':{'below':FIELD_BELOW,'above':FIELD_ABOVE,'no_estimate':FIELD_ABSENT},
             'source':'plot_samples.npz display grid, depth-rectified, acceptance mask applied',
             'dudx_note':'central finite difference of the smoothed u along x; not the screened analytic gradient',
