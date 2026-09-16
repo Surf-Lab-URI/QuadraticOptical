@@ -160,6 +160,8 @@ class ImageOnlyTracker:
     def __init__(self, inp):
         self.inp=inp
         for k in INPUT_KEYS: setattr(self,k,inp[k])
+        # Optional so inputs written before this was configurable still load.
+        self.detector_min_depth_px=float(inp['detector_min_depth_px']) if 'detector_min_depth_px' in inp else 14.
         shape=self.A.shape
         assert len(shape)==2
         for k in ['B','rawA','rawB','va','vb']: assert getattr(self,k).shape==shape
@@ -284,7 +286,7 @@ class ImageOnlyTracker:
         background=gaussian_filter(self.rawA,5);yy,xx=np.indices(self.rawA.shape)
         depth=yy-self.surface_a[None]
         det=((hp==maximum_filter(hp,size=5))&(hp>8)&(xx>=4)&(xx<self.rawA.shape[1]-4)&
-             (yy>=4)&(yy<self.rawA.shape[0]-4)&(depth>=14)&
+             (yy>=4)&(yy<self.rawA.shape[0]-4)&(depth>=self.detector_min_depth_px)&
              (depth<=float(self.detector_max_depth_px))&self.va&(background<180))
         return dict(points=np.c_[xx[det],yy[det]].astype(float),strength=hp[det])
 
@@ -320,7 +322,9 @@ class Runner:
             source_sha256=source_hashes(TRACKING_SOURCES),
             requested_max_depth_px=float(inp['requested_max_depth_px']),
             fitting_max_depth_px=float(inp['fitting_max_depth_px']),
-            detector_max_depth_px=float(inp['detector_max_depth_px']),chunk_size=args.chunk_size)
+            detector_max_depth_px=float(inp['detector_max_depth_px']),
+            detector_min_depth_px=float(inp['detector_min_depth_px']) if 'detector_min_depth_px' in inp else 14.,
+            chunk_size=args.chunk_size)
         self.coarse_signature=hashlib.sha256(json.dumps(self.identity,sort_keys=True).encode()).hexdigest()
         self.signature=hashlib.sha256((self.coarse_signature+str(args.bootstrap_radius)).encode()).hexdigest()
         self.coarse_chunks=self.base/'tracking_checkpoints'/self.coarse_signature[:16]

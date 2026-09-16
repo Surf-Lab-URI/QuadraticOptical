@@ -10,7 +10,8 @@ DEFAULTS = {
     'surface': {'mode': 'auto', 'index_base': 1, 'offset_px': 0.},
     'availability': 'full', 'intensity_scale': 1.,
     'intensity_offset': 0., 'workers': 1,
-    'surface_exclusion_px': 10.,
+    'surface_exclusion_px': 10., 'min_depth_px': 12., 'min_target_depth_px': 10.,
+    'detector_min_depth_px': 14., 'gradient_min_depth_px': 20.,
     'integration_interval_px': 2., 'depth_step_m': .0001,
     'piv_quality': 'correlation', 'pairs': {},
 }
@@ -72,8 +73,13 @@ def validate(c):
             raise ValueError(key + ' must be finite and positive.')
     if not _number(c['intensity_offset']):
         raise ValueError('intensity_offset must be finite.')
-    if not _number(c['surface_exclusion_px']) or c['surface_exclusion_px'] < 0:
-        raise ValueError('surface_exclusion_px must be finite and not negative.')
+    for key in ['surface_exclusion_px', 'min_depth_px', 'min_target_depth_px',
+                'detector_min_depth_px', 'gradient_min_depth_px']:
+        if not _number(c[key]) or c[key] < 0:
+            raise ValueError(key + ' must be finite and not negative.')
+    if c['gradient_min_depth_px'] < c['min_depth_px']:
+        raise ValueError('gradient_min_depth_px cannot be shallower than min_depth_px; a derivative '
+                         'is only reported where its velocity is.')
     for key in ['workers', 'grid_spacing_px']:
         value = c[key]
         if not _number(value) or int(value) != value or value < 1:

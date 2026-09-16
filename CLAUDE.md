@@ -158,6 +158,36 @@ emitted config set to match.
 
 ## Surface exclusion and the contrast floor
 
+All four near-surface floors are configuration keys:
+
+| Key | Default | What it gates |
+|-----|---------|---------------|
+| `surface_exclusion_px` | 10 | pixels admitted to any fit |
+| `min_depth_px` | 12 | grid construction AND acceptance |
+| `min_target_depth_px` | 10 | the predicted destination's depth in B |
+| `detector_min_depth_px` | 14 | shallowest particle candidate |
+| `gradient_min_depth_px` | 20 | shallowest reported du/dx and dw/dz |
+
+Measured reach at the defaults, over 61 pairs: shallowest accepted velocity 12.1
+to 18.1 px (0.68-1.03 mm), shallowest accepted gradient 20.0 to 23.0 px
+(1.13-1.30 mm), with 0.6% of accepted vectors above 20 px.
+
+Three things make lowering them subtler than it looks. `min_depth_px` acts in two
+places, grid construction in `prepare.py` and acceptance in `finalize_fields.py`;
+before this it was two separate literals and changing one alone did nothing, since
+the grid would never hold shallower points for acceptance to test. Acceptance also
+requires the predicted destination in B to clear `min_target_depth_px`, so an
+upward-moving particle can fail on where it lands rather than where it started,
+which is why that floor moves too. And the grid lattice is `grid_spacing_px`, so
+the achievable floor is quantised: asking for 11 px gets whichever lattice rows
+happen to fall below it.
+
+`gradient_min_depth_px` below `min_depth_px` is refused: a derivative is only
+reported where its velocity is. The floors travel in `inputs.npz`, so inputs
+written before they existed keep the original literals and remain reproducible,
+verified by re-evaluating frozen nodes to identical acceptance and zero
+displacement difference.
+
 `surface_exclusion_px` (default 10) replaces the hard-coded near-surface mask.
 The margin alternatives shift with it, so `margin14` stays four pixels deeper than
 the primary whatever the base is. Note there are **three** separate near-surface

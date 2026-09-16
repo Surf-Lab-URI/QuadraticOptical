@@ -108,6 +108,8 @@ def prepare(pair,directory,config):
     arrays={}
     yy=np.arange(height)[:,None]
     exclusion=float(config['surface_exclusion_px']);floor=contrast_floor(config['intensity_scale'])
+    min_depth=float(config['min_depth_px']);min_target=float(config['min_target_depth_px'])
+    detector_min=float(config['detector_min_depth_px']);gradient_min=float(config['gradient_min_depth_px'])
     for fr in 'AB':
         s=surf[fr]-base+offset
         if s.shape!=(width,) or not np.isfinite(s).all():raise ValueError('Each surface must contain one finite row coordinate per image column.')
@@ -123,14 +125,16 @@ def prepare(pair,directory,config):
     points=np.c_[xx.ravel(),yy.ravel()]
     depth=points[:,1]-np.interp(points[:,0],np.arange(width),arrays['surface_a'])
     requested=config['depth_m']/dx;fitting=requested+64;detector=fitting+25
-    use=(depth>=12)&(depth<=fitting)&arrays['va'][points[:,1].astype(int),points[:,0].astype(int)]
+    use=(depth>=min_depth)&(depth<=fitting)&arrays['va'][points[:,1].astype(int),points[:,0].astype(int)]
     points=points[use];depth=depth[use]
-    if len(points)<16 or not np.any(depth<=requested):raise ValueError('Insufficient source grid points in the requested depth band. Check geometry/calibration/depth.')
+    if len(points)<16 or not np.any(depth<=requested):raise ValueError('Insufficient source grid points in the requested depth band. Check geometry/calibration/depth, and min_depth_px.')
     arrays.update(points=points,source_depth=depth,origin0=np.array([0,0]),DX=np.array(dx),DT=np.array(dt),
         requested_max_depth_px=np.array(requested),fitting_max_depth_px=np.array(fitting),detector_max_depth_px=np.array(detector),
         image_only=np.array(True),supplied_velocity_used=np.array(False),physical_units_confirmed=np.array(True),
         surface_geometry_inferred=np.array(mode=='nonzero_boundary' or offset!=0),surface_trace_offset_px=np.array(offset),
         surface_exclusion_px=np.array(exclusion),contrast_floor=np.array(floor),intensity_scale=np.array(float(config['intensity_scale'])),
+        min_depth_px=np.array(min_depth),min_target_depth_px=np.array(min_target),
+        detector_min_depth_px=np.array(detector_min),gradient_min_depth_px=np.array(gradient_min),
         pair_number=np.array(pair.pair_number if pair.pair_number is not None else -1))
     plan={'schema':1,'pair_name':pair.name,'experiment':pair.experiment,'pair_number':pair.pair_number,
         'image_records':records,'config':config,'surface_mode_resolved':mode,

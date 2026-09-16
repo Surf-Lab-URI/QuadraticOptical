@@ -165,7 +165,9 @@ def load_geometry(path):
             raise ValueError('Missing geometry fields: ' + ', '.join(missing))
         data = {k: z[k] for k in keys}
         for k in ('physical_units_confirmed', 'surface_geometry_inferred', 'surface_trace_offset_px',
-                  'requested_max_depth_px', 'fitting_max_depth_px', 'detector_max_depth_px'):
+                  'requested_max_depth_px', 'fitting_max_depth_px', 'detector_max_depth_px',
+                  'min_depth_px', 'min_target_depth_px', 'detector_min_depth_px',
+                  'gradient_min_depth_px', 'surface_exclusion_px'):
             if k in z.files:
                 data[k] = z[k]
     return data
@@ -184,6 +186,14 @@ class ConservativeEvaluator:
     def __init__(self, directory, requested_depth_m=.01, batch_size=4096):
         self.directory = Path(directory)
         self.inputs = load_geometry(self.directory/'inputs.npz')
+        # Depth floors travel with the inputs; older files predate them and keep
+        # the original literals, so existing results stay reproducible.
+        def _floor(name, fallback):
+            value = self.inputs.get(name)
+            return fallback if value is None else float(np.asarray(value).ravel()[0])
+        self.min_depth = _floor('min_depth_px', 12.)
+        self.min_target_depth = _floor('min_target_depth_px', 10.)
+        self.gradient_min_depth = _floor('gradient_min_depth_px', 20.)
         self.origin0 = self.inputs['origin0']
         if not np.array_equal(self.origin0, [0, 0]):
             raise ValueError('These full-image source coordinates require origin0=[0,0].')
@@ -268,12 +278,13 @@ class ConservativeEvaluator:
             # no original image-consistency or lower-depth threshold changes.
             requested_domain = finite_q & (depth <= self.max_depth_px+1e-9)
             evidence = (available & (forward_share >= .95) & (reverse_share >= .95) &
-                        (depth >= 12) & requested_domain & (target_depth >= 10) & support &
+                        (depth >= self.min_depth) & requested_domain &
+                        (target_depth >= self.min_target_depth) & support &
                         (ncc >= .6) & (fb <= 1) & (spread <= 1.5) & (determinant > .2) &
                         np.all(np.isfinite(u), axis=1))
             accepted = evidence & source_visible & target_visible
-            gradient_xx = accepted & (depth >= 20) & (spread_xx <= .08) & (nearest <= 10)
-            gradient_yy = accepted & (depth >= 20) & (spread_yy <= .08) & (nearest <= 10)
+            gradient_xx = accepted & (depth >= self.gradient_min_depth) & (spread_xx <= .08) & (nearest <= 10)
+            gradient_yy = accepted & (depth >= self.gradient_min_depth) & (spread_yy <= .08) & (nearest <= 10)
         return dict(query=q.copy(), query_full=q+self.origin0, disp=u, gradient=g, ncc=ncc,
                     fb=fb, depth=depth, target_depth=target_depth, method_spread=spread,
                     gradient_spread_xx=spread_xx, gradient_spread_yy=spread_yy,
@@ -314,7 +325,11 @@ def run(directory, requested_depth_m=.01, batch_size=4096):
                      surface_a=inp['surface_a'], surface_b=inp['surface_b'],
                      alternative_names=np.array(ALTERNATIVES), **evaluator.provenance)
     atomic_npz(directory/'results.npz', **dict(result, **metadata))
-    thresholds = dict(THRESHOLDS, max_depth=evaluator.max_depth_px)
+    # THRESHOLDS records the defaults; a run with different floors must not have
+    # its summary claim the defaults were used.
+    thresholds = dict(THRESHOLDS, max_depth=evaluator.max_depth_px,
+                      min_depth=evaluator.min_depth, target_depth=evaluator.min_target_depth,
+                      gradient_depth=evaluator.gradient_min_depth)
     summary = dict(pair=str(pair), method='Fresh image-only masked robust quadratic registration initialized by image-only automatic particle tracks.',
                     grid_nodes=n, fitting_grid_nodes=len(inp['points']), accepted_grid=int(accepted.sum()),
                     gradient_grid_xx=int(gx.sum()), gradient_grid_yy=int(gy.sum()),
