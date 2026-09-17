@@ -463,3 +463,57 @@ no `conftest.py`. The `slow` marker registered in `pyproject.toml` is used by no
 - Preserve the conservative contract: missing estimates stay missing. Never substitute
   zero, an interpolated value, or a supplied PIV/IR velocity for an unsupported result.
 - Keep numeric arrays together with their acceptance masks in any export.
+
+## Near-surface coverage: what actually gates it
+
+Established by a 13-experiment batch (all runs, pairs 70-150, `analysis_L2` floors:
+`surface_exclusion_px=4`, `min_depth_px=5`, `min_target_depth_px=4`,
+`detector_min_depth_px=6`, `gradient_min_depth_px=9`). Verified against the raw
+arrays, and the first three points survived an adversarial re-check.
+
+**`support` is the binding gate near the surface, not the correlation gates.**
+Of nodes in the 5-7 px band that pass every other term of the acceptance rule at
+`core/finalize_fields.py:266-274`, the fraction then failing `support`
+(`:264`, `in_hull & nearest<=12 & count>=6`) runs from 29% in a good run to 98%
+in a bad one. `ncc`, `fb`, `method_spread` and the determinant are nearly
+identical between runs there and are *not* what separates them. Within
+`support` it is `in_hull` that binds.
+
+**`in_hull` is a global convex hull in image (x, y) coordinates**, built at
+`:215-221` from accepted track positions; `Delaunay.find_simplex >= 0` at `:220`.
+Its top edge is a coarse straight-segment lid spanning the whole 2048 px frame.
+A shallow node passes by falling under that lid, *not* because a track sits above
+it -- verified: no 5-7 px node in any run has an accepted track within +/-12 px in
+x above it, including nodes that pass. So a 1-2 px change in the shallowest
+accepted track anywhere in the frame tilts the lid and moves near-surface
+coverage a long way. Do not reason about the hull in depth-below-local-surface;
+with ~9 px of surface relief the two frames are not interchangeable.
+
+**Laser glare can blind the detector entirely.** The detector requires
+`background < 180` (`core/tracking.py:298-305`, scaled by `intensity_scale`).
+Where a surface reflection saturates the 255-clipped frame, 100% of pixels in a
+band exceed that ceiling and *zero* candidates are produced, however good the
+seeding is. In `ExpLCL_4_05` this blinds everything above ~10-12 px: 0.16%
+acceptance at 5-7 px against 5.6-10.4% for the other block-4 runs, while its
+seeding is 15% *better* than theirs. The deficit closes at exactly 20 px and
+nothing deeper is affected -- accepted quality below 20 px is equal or better
+than its neighbours. The signal is still in the raw frames; re-extracting at
+`--clip 1023` recovers the shallow candidates, but note the ceiling scales with
+`intensity_scale`, so the gate is algebraically "raw background < 180 counts" at
+any clip and raising the clip alone does not lift it.
+
+**Do not compare near-surface density between runs without pinning the datum.**
+Acceptance vs depth is extremely steep in 5-10 px: block means at 5, 6, 7, 8 px
+run 0.30/0.63/4.07/8.78 (block 1) against 3.13/6.02/12.18/20.13 (block 4). One
+pixel of datum error moves the 5-7 px figure by 2-6x, and a single uniform ~2 px
+depth shift aligns all four blocks' curves onto each other. The surface datum is
+not pinned to better than ~3 px, and the glare-band brightness landmark itself
+shifts +0 to +3 px across the campaign. An apparent between-run difference in
+near-surface coverage of less than roughly a factor of ten is therefore not
+separable from datum drift. Comparisons *within* a run, and anything below
+~20 px, are unaffected.
+
+**Campaign timing.** The `ts` field in each raw frame decodes as a Windows
+FILETIME: the 13 runs were recorded 2014-12-03 17:25:57 to 22:09:29, in strict
+block order about 21 min apart. Block, elapsed time and forcing level therefore
+vary together and cannot be separated with 13 runs.
