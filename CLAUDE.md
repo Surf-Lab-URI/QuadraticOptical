@@ -502,16 +502,29 @@ than its neighbours. The signal is still in the raw frames; re-extracting at
 `intensity_scale`, so the gate is algebraically "raw background < 180 counts" at
 any clip and raising the clip alone does not lift it.
 
-**Do not compare near-surface density between runs without pinning the datum.**
-Acceptance vs depth is extremely steep in 5-10 px: block means at 5, 6, 7, 8 px
-run 0.30/0.63/4.07/8.78 (block 1) against 3.13/6.02/12.18/20.13 (block 4). One
-pixel of datum error moves the 5-7 px figure by 2-6x, and a single uniform ~2 px
-depth shift aligns all four blocks' curves onto each other. The surface datum is
-not pinned to better than ~3 px, and the glare-band brightness landmark itself
-shifts +0 to +3 px across the campaign. An apparent between-run difference in
-near-surface coverage of less than roughly a factor of ten is therefore not
-separable from datum drift. Comparisons *within* a run, and anything below
-~20 px, are unaffected.
+**The surface datum is independent of the PIV images.** `surfsPIV` comes from a
+gradient-maximum detection on *separate images taken with a separate laser*, not
+from the PIV frames. Nothing about PIV illumination -- glare, clipping, intensity
+scale -- can move it. This matters because the PIV glare band changes markedly
+across the campaign (its brightness peak sits +0/+1 px below `surfsPIV` in the
+first runs and +3 px in the last, and it grows ~4x brighter): that is the glare
+band itself penetrating deeper, NOT the datum drifting. Do not read a shifting
+brightness landmark as evidence about the surface position.
+
+The residual uncertainty is the coordinate transformation from surface-detection
+image coordinates into PIV image coordinates, fixed once by the original
+experimenter. Treat it as given: it is a *constant* offset across all runs, so it
+shifts every acceptance-vs-depth curve together and cannot manufacture a
+difference BETWEEN runs or blocks. Only a block-varying error could do that, and
+with detection decoupled from the PIV images there is no mechanism for one unless
+the camera moved between runs. Do not "correct" this transformation to improve
+agreement -- the error it would absorb is unknown rather than measured, and
+tuning someone else's calibration until your own numbers improve is not a
+defensible result.
+
+Absolute near-surface depths still carry that constant offset, so quote them as
+depths below the detected surface rather than as absolute distances from the
+water. Comparisons between runs, and within a run, are unaffected.
 
 **Campaign timing.** The `ts` field in each raw frame decodes as a Windows
 FILETIME: the 13 runs were recorded 2014-12-03 17:25:57 to 22:09:29, in strict
