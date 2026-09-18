@@ -38,9 +38,10 @@ for n in PAIRS:
     for f in src.iterdir():
         if f.name in keep and f.is_file(): shutil.copy2(f,dst/f.name)
     _,summary=finalize_fields.run(dst, requested_depth_m=CFG['depth_m'], acceptance=PROFILE)
-    sample_plot_grid(dst, CFG['depth_m'])
+    sample_plot_grid(dst, CFG['depth_m'], PROFILE)
     integrate_profile.run(dst, requested_depth_m=CFG['depth_m'],
-        interval_px=CFG['integration_interval_px'], depth_step_m=CFG['depth_step_m'])
+        interval_px=CFG['integration_interval_px'], depth_step_m=CFG['depth_step_m'],
+        acceptance=PROFILE)
     sel=surface_reference(dst,None)
     comparison=None
     if PIVDIR is not None:

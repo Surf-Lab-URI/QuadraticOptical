@@ -4,6 +4,7 @@ No prior results, supplied PIV velocity arrays or manual endpoints are read.
 Missing intervals remain missing. Model envelopes are sensitivity, not CIs.
 """
 import os
+import json
 from pathlib import Path
 import argparse,hashlib,json,time
 import numpy as np
@@ -146,14 +147,22 @@ def atomic_npz(path,arrays):
     with temp.open('wb') as f:np.savez_compressed(f,**arrays)
     os.replace(str(temp),str(path))
 
-def run(directory, requested_depth_m=.01, interval_px=2., depth_step_m=.0001, depth_batch=8):
+def run(directory, requested_depth_m=.01, interval_px=2., depth_step_m=.0001, depth_batch=8,
+        acceptance=None):
     """Evaluate and integrate horizontal paths below the local free surface."""
     if not np.isfinite([requested_depth_m, interval_px, depth_step_m]).all() or min(requested_depth_m, interval_px, depth_step_m) <= 0 or depth_batch < 1:
         raise ValueError('Positive finite depth/sampling and positive depth_batch are required.')
     started=time.time();directory=Path(directory).resolve();pair=directory.name
     # Only the new image-only evaluator is imported; it does not use prior fields.
     from .finalize_fields import ConservativeEvaluator
-    evaluator=ConservativeEvaluator(directory, requested_depth_m=requested_depth_m)
+    # Integrate the same field that was reported: a profile screened by the
+    # default rule would not match the results.npz it claims to summarise.
+    if acceptance is None:
+        summary_path=Path(directory)/'summary.json'
+        if summary_path.exists():
+            acceptance=json.loads(summary_path.read_text()).get('acceptance_profile')
+    evaluator=ConservativeEvaluator(directory, requested_depth_m=requested_depth_m,
+                                    acceptance=acceptance)
     inp=evaluator.inputs;DX=float(evaluator.DX);DT=float(evaluator.DT)
     if DX<=0 or DT<=0:raise ValueError('Positive calibration values required.')
     height,width=inp['va'].shape;surface=np.asarray(inp['surface_a'],float)

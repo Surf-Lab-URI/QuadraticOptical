@@ -91,8 +91,16 @@ def save(fig,directory,name):
     fig.savefig(directory/(name+'.png'),dpi=180,bbox_inches='tight')
     fig.savefig(directory/(name+'.svg'),bbox_inches='tight');plt.close(fig)
 
-def sample_plot_grid(directory,depth_m):
-    ev=ConservativeEvaluator(directory,requested_depth_m=depth_m)
+def sample_plot_grid(directory,depth_m,acceptance=None):
+    # The display grid must be screened like results.npz, or the field panels
+    # drawn from it show a different rule than the viewer drawn from that file:
+    # holes appear in the contours that are not holes in the quiver layer.
+    # Falls back to what the pair recorded so a re-render stays consistent.
+    if acceptance is None:
+        summary_path=Path(directory)/'summary.json'
+        if summary_path.exists():
+            acceptance=json.loads(summary_path.read_text()).get('acceptance_profile')
+    ev=ConservativeEvaluator(directory,requested_depth_m=depth_m,acceptance=acceptance)
     width=len(ev.inputs['surface_a'])
     x=np.arange(7,width,8,dtype=float)
     h=np.r_[np.arange(0,ev.max_depth_px,4.),ev.max_depth_px]

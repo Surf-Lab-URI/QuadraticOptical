@@ -140,3 +140,41 @@ def test_viewer_paired_layer_uses_the_pairs_acceptance():
     body = inspect.getsource(viewer.collect)
     assert 'acceptance=recorded' in body, 'viewer scores picks with the default rule'
     assert "get('acceptance_profile')" in body
+
+
+def test_display_grid_uses_the_runs_acceptance():
+    """plot_samples.npz must be screened like results.npz.
+
+    The field panels are drawn from the display grid while the viewer's dense
+    layer is drawn from results.npz. If only one of them sees the profile, the
+    contours show holes the quiver layer does not -- which is exactly how this
+    was found, by eye, in a relaxed pair.
+    """
+    import inspect
+    from quadratic_optical import reporting
+    assert 'acceptance' in inspect.signature(reporting.sample_plot_grid).parameters
+    body = inspect.getsource(reporting.sample_plot_grid)
+    assert 'acceptance=acceptance' in body, 'profile not forwarded to the evaluator'
+    assert "get('acceptance_profile')" in body, 'no fallback to the recorded profile'
+
+
+def test_every_evaluator_construction_can_take_a_profile():
+    """Guard against a fourth site screening with the default rule.
+
+    Any place that builds a ConservativeEvaluator and screens output the user
+    compares against results.npz must accept a profile. This catches a new
+    call site added without one.
+    """
+    import re, pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]/'src'/'quadratic_optical'
+    offenders = []
+    for path in root.rglob('*.py'):
+        text = path.read_text()
+        if path.name == 'finalize_fields.py':
+            # Its own run() is the canonical site and is checked above; the
+            # class definition and the API string in summary.json are not calls.
+            text = text.replace("integration_api='ConservativeEvaluator(directory)", "integration_api='X(")
+        for m in re.finditer(r'(?<!class )ConservativeEvaluator\((.*?)\)', text, re.S):
+            if 'acceptance' not in m.group(1):
+                offenders.append('%s: %s' % (path.name, m.group(1)[:70].replace('\n', ' ')))
+    assert not offenders, 'evaluator built without an acceptance profile:\n' + '\n'.join(offenders)

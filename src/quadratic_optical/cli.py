@@ -132,10 +132,11 @@ def run_batch(args):
                 stage('finalization')
                 _, summary = finalize_fields.run(directory, requested_depth_m=cfg['depth_m'],
                                                  acceptance=acceptance)
-                sample_plot_grid(directory, cfg['depth_m'])
+                sample_plot_grid(directory, cfg['depth_m'], acceptance)
                 stage('integration')
                 integrate_profile.run(directory, requested_depth_m=cfg['depth_m'],
-                    interval_px=cfg['integration_interval_px'], depth_step_m=cfg['depth_step_m'])
+                    interval_px=cfg['integration_interval_px'], depth_step_m=cfg['depth_step_m'],
+                    acceptance=acceptance)
                 row.update(prediction_status='complete', prediction_summary=summary, image_only=True)
                 selected_surface=surface_reference(directory,annotations.get(pair.name))
                 comparison = None
