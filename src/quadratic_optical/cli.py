@@ -77,6 +77,17 @@ def run_batch(args):
     from .reporting import sample_plot_grid, render_pair, render_batch, write_json, surface_reference
     from .comparison import compare_pair
     config = load_config(args.config)
+    # Resolved once, before any pair runs, so a bad profile fails immediately
+    # rather than after the first pair has been fitted.
+    acceptance = getattr(args, 'acceptance', None) or 'baseline'
+    if acceptance.strip().startswith('{'):
+        acceptance = json.loads(acceptance)
+    acceptance = finalize_fields.acceptance_settings(acceptance)
+    if acceptance['profile_name'] != 'baseline':
+        print('Acceptance rule relaxed to profile "%s": %s' % (
+            acceptance['profile_name'],
+            ', '.join('%s=%s' % (k, v) for k, v in sorted(acceptance.items())
+                      if k != 'profile_name')), flush=True)
     if args.workers is not None:
         if args.workers < 1:
             raise ValueError('--workers must be positive.')
@@ -119,7 +130,8 @@ def run_batch(args):
                 stage('fitting')
                 fit_fields.run(directory, workers=cfg['workers'])
                 stage('finalization')
-                _, summary = finalize_fields.run(directory, requested_depth_m=cfg['depth_m'])
+                _, summary = finalize_fields.run(directory, requested_depth_m=cfg['depth_m'],
+                                                 acceptance=acceptance)
                 sample_plot_grid(directory, cfg['depth_m'])
                 stage('integration')
                 integrate_profile.run(directory, requested_depth_m=cfg['depth_m'],
@@ -278,6 +290,12 @@ def parser():
     r.add_argument('--piv-quality', choices=['correlation', 'finite'],
                    help='Comparison only: require finite dcor (default), or retain supplied finite vectors without dcor.')
     r.add_argument('--ir-results');r.add_argument('--experiment')
+    r.add_argument('--acceptance', default='baseline',
+                   help="image-consistency strictness of the final acceptance rule: "
+                        "'baseline' (the original conservative rule), 'mild', 'aggressive', "
+                        "or inline JSON of individual terms. Relaxing this fills holes at the "
+                        "cost of evidence; the values applied are recorded in summary.json "
+                        "under acceptance_profile. Use a fresh --output directory.")
     r.add_argument('--manual-ptv', help='directory of hand-matched particle .mat files; matched to a '
                    'pair by the exp_name and image_pair_number stored inside them, not by filename')
     c = sub.add_parser('compare', help='Compare an existing frozen prediction without refitting.')

@@ -28,6 +28,70 @@ THRESHOLDS = dict(min_depth=12., requested_depth_m=.01, target_depth=10., ncc=.6
                   visible_mask_interpolated_min=.99, blend_radius=16.,
                   upper_domain_roundoff_tolerance_px=1e-9)
 
+# The image-consistency terms of the acceptance rule, as tunable values rather
+# than literals. ACCEPTANCE_DEFAULTS reproduces the original rule exactly, so a
+# run that passes nothing is bit-identical to one from before this existed.
+#
+# These are NOT configuration keys: they do not affect preparation, tracking or
+# fitting, so putting them in config.json would sign them into the preparation
+# signature and close every existing output directory for a change that alters
+# no input. They are passed to finalize_fields.run and recorded in summary.json
+# under acceptance_profile, which is what makes a relaxed result identifiable.
+#
+# require_hull deserves its own warning. The hull is a GLOBAL convex lid over
+# accepted track positions in image coordinates, so near the surface it is
+# usually the binding term; dropping it is the single biggest lever on shallow
+# coverage and also the least locally justified, since nothing replaces it
+# except the nearest/count25 radius tests. Relax it knowingly.
+ACCEPTANCE_DEFAULTS = dict(valid_share=.95, ncc=.6, fb=1., spread=1.5, det=.2,
+                           nearest=12., count25=6, require_hull=True,
+                           gradient_spread=.08, gradient_nearest=10.)
+ACCEPTANCE_PROFILES = {
+    'baseline': {},
+    'mild': dict(valid_share=.80, ncc=.5, fb=1.5, spread=2., det=.15,
+                 nearest=16., count25=4, require_hull=True,
+                 gradient_spread=.12, gradient_nearest=14.),
+    'aggressive': dict(valid_share=.60, ncc=.4, fb=2.5, spread=3., det=.1,
+                       nearest=25., count25=3, require_hull=False,
+                       gradient_spread=.20, gradient_nearest=20.),
+}
+
+
+def acceptance_settings(acceptance=None):
+    """Resolve a profile name or explicit mapping against the original rule."""
+    if acceptance is None:
+        acceptance = {}
+    if isinstance(acceptance, str):
+        if acceptance not in ACCEPTANCE_PROFILES:
+            raise ValueError('Unknown acceptance profile: ' + acceptance +
+                             '. Known: ' + ', '.join(sorted(ACCEPTANCE_PROFILES)))
+        name, overrides = acceptance, ACCEPTANCE_PROFILES[acceptance]
+    else:
+        # Idempotent: an already-resolved mapping carries profile_name, and the
+        # CLI resolves once before the batch so a bad profile fails immediately.
+        acceptance = dict(acceptance)
+        resolved_name = acceptance.pop('profile_name', None)
+        unknown = set(acceptance) - set(ACCEPTANCE_DEFAULTS)
+        if unknown:
+            raise ValueError('Unknown acceptance key: ' + ', '.join(sorted(unknown)))
+        name = resolved_name or ('custom' if acceptance else 'baseline')
+        overrides = acceptance
+    out = dict(ACCEPTANCE_DEFAULTS, **overrides)
+    out['require_hull'] = bool(out['require_hull'])
+    for key, value in out.items():
+        if key == 'require_hull':
+            continue
+        value = float(value)
+        if not np.isfinite(value):
+            raise ValueError('acceptance.' + key + ' must be finite.')
+        out[key] = value
+    if not 0. <= out['valid_share'] <= 1.:
+        raise ValueError('acceptance.valid_share is a fraction in [0,1].')
+    if out['count25'] < 3:
+        raise ValueError('acceptance.count25 below 3 cannot support a local fit.')
+    out['profile_name'] = name
+    return out
+
 
 def neighborhoods(tree, query, radius=16.):
     """One spatial query per geometry; keep original single-point tree order."""
@@ -183,8 +247,9 @@ class ConservativeEvaluator:
     the regular grid, contain missing/invalid positions, and be evaluated in
     independently sized batches without reusing another query's field values.
     """
-    def __init__(self, directory, requested_depth_m=.01, batch_size=4096):
+    def __init__(self, directory, requested_depth_m=.01, batch_size=4096, acceptance=None):
         self.directory = Path(directory)
+        self.acceptance = acceptance_settings(acceptance)
         self.inputs = load_geometry(self.directory/'inputs.npz')
         # Depth floors travel with the inputs; older files predate them and keep
         # the original literals, so existing results stay reproducible.
@@ -265,7 +330,10 @@ class ConservativeEvaluator:
             nearest[finite_q] = self.feature_tree.query(q[finite_q])[0]
             count[finite_q] = self.feature_tree.query_ball_point(q[finite_q], 25., return_length=True)
             in_hull[finite_q] = self.feature_hull.find_simplex(q[finite_q]) >= 0
-        support = in_hull & (nearest <= 12) & (count >= 6)
+        a = self.acceptance
+        support = (nearest <= a['nearest']) & (count >= a['count25'])
+        if a['require_hull']:
+            support = support & in_hull
         depth = q[:, 1]-np.interp(q[:, 0], self.surface_x, self.inputs['surface_a'])
         target_depth = target[:, 1]-np.interp(target[:, 0], self.surface_x, self.inputs['surface_b'])
         determinant = np.full(n, np.nan)
@@ -277,14 +345,18 @@ class ConservativeEvaluator:
             # Only the requested-domain upper edge gets floating-point slack;
             # no original image-consistency or lower-depth threshold changes.
             requested_domain = finite_q & (depth <= self.max_depth_px+1e-9)
-            evidence = (available & (forward_share >= .95) & (reverse_share >= .95) &
+            evidence = (available & (forward_share >= a['valid_share']) &
+                        (reverse_share >= a['valid_share']) &
                         (depth >= self.min_depth) & requested_domain &
                         (target_depth >= self.min_target_depth) & support &
-                        (ncc >= .6) & (fb <= 1) & (spread <= 1.5) & (determinant > .2) &
+                        (ncc >= a['ncc']) & (fb <= a['fb']) & (spread <= a['spread']) &
+                        (determinant > a['det']) &
                         np.all(np.isfinite(u), axis=1))
             accepted = evidence & source_visible & target_visible
-            gradient_xx = accepted & (depth >= self.gradient_min_depth) & (spread_xx <= .08) & (nearest <= 10)
-            gradient_yy = accepted & (depth >= self.gradient_min_depth) & (spread_yy <= .08) & (nearest <= 10)
+            gradient_xx = (accepted & (depth >= self.gradient_min_depth) &
+                           (spread_xx <= a['gradient_spread']) & (nearest <= a['gradient_nearest']))
+            gradient_yy = (accepted & (depth >= self.gradient_min_depth) &
+                           (spread_yy <= a['gradient_spread']) & (nearest <= a['gradient_nearest']))
         return dict(query=q.copy(), query_full=q+self.origin0, disp=u, gradient=g, ncc=ncc,
                     fb=fb, depth=depth, target_depth=target_depth, method_spread=spread,
                     gradient_spread_xx=spread_xx, gradient_spread_yy=spread_yy,
@@ -301,12 +373,13 @@ def optional_range(values, selected):
     return [float(values[selected].min()), float(values[selected].max())] if selected.any() else None
 
 
-def run(directory, requested_depth_m=.01, batch_size=4096):
+def run(directory, requested_depth_m=.01, batch_size=4096, acceptance=None):
     """Evaluate and save the requested conservative reporting grid."""
     started = time.time()
     directory = Path(directory).resolve()
     pair = directory.name
-    evaluator = ConservativeEvaluator(directory, requested_depth_m=requested_depth_m, batch_size=batch_size)
+    evaluator = ConservativeEvaluator(directory, requested_depth_m=requested_depth_m,
+                                      batch_size=batch_size, acceptance=acceptance)
     inp = evaluator.inputs
     depth = inp['points'][:, 1]-np.interp(inp['points'][:, 0], evaluator.surface_x, inp['surface_a'])
     # The reporting grid must reach as shallow as acceptance will allow, or a
@@ -327,11 +400,17 @@ def run(directory, requested_depth_m=.01, batch_size=4096):
                      surface_a=inp['surface_a'], surface_b=inp['surface_b'],
                      alternative_names=np.array(ALTERNATIVES), **evaluator.provenance)
     atomic_npz(directory/'results.npz', **dict(result, **metadata))
-    # THRESHOLDS records the defaults; a run with different floors must not have
-    # its summary claim the defaults were used.
+    # THRESHOLDS records the defaults; a run with different floors or a relaxed
+    # acceptance profile must not have its summary claim the defaults were used.
+    acc = evaluator.acceptance
     thresholds = dict(THRESHOLDS, max_depth=evaluator.max_depth_px,
                       min_depth=evaluator.min_depth, target_depth=evaluator.min_target_depth,
-                      gradient_depth=evaluator.gradient_min_depth)
+                      gradient_depth=evaluator.gradient_min_depth,
+                      ncc=acc['ncc'], fb=acc['fb'], spread=acc['spread'], det=acc['det'],
+                      nearest=acc['nearest'], count25=acc['count25'],
+                      valid_share=acc['valid_share'], require_hull=acc['require_hull'],
+                      gradient_spread=acc['gradient_spread'],
+                      gradient_nearest=acc['gradient_nearest'])
     summary = dict(pair=str(pair), method='Fresh image-only masked robust quadratic registration initialized by image-only automatic particle tracks.',
                     grid_nodes=n, fitting_grid_nodes=len(inp['points']), accepted_grid=int(accepted.sum()),
                     gradient_grid_xx=int(gx.sum()), gradient_grid_yy=int(gy.sum()),
@@ -342,7 +421,9 @@ def run(directory, requested_depth_m=.01, batch_size=4096):
                     mask_visibility_exclusions_grid=int((result['evidence_pass'] &
                                                         ~(result['source_visible'] & result['target_visible'])).sum()),
                     requested_depth_m=evaluator.requested_depth_m, requested_depth_px=evaluator.max_depth_px,
-                    thresholds=thresholds, origin_zero_based=inp['origin0'].tolist(),
+                    thresholds=thresholds, acceptance_profile=dict(acc),
+                    acceptance_is_default=(acc['profile_name'] == 'baseline'),
+                    origin_zero_based=inp['origin0'].tolist(),
                     DX=evaluator.DX, DT=evaluator.DT, physical_units_confirmed=bool(inp.get('physical_units_confirmed', False)),
                     image_only=True, supplied_velocity_used=False,
                     manual_validation_available=False, previous_pair_fits_used=False,
