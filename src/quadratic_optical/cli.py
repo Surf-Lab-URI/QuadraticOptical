@@ -47,7 +47,7 @@ def surface_annotations(pairs, results_path, experiment=None):
     return records
 
 
-def manual_for(folder, directory):
+def manual_for(folder, directory, acceptance=None):
     """Held-out hand-matched comparison for this pair, or None when absent.
 
     The pair's identity comes from its own frozen manifest rather than from
@@ -68,7 +68,7 @@ def manual_for(folder, directory):
     record = find_manual(folder, manifest.get('experiment'), int(pair_number))
     if record is None:
         return None
-    return compare_manual(directory, record)
+    return compare_manual(directory, record, acceptance=acceptance)
 
 
 def run_batch(args):
@@ -144,7 +144,7 @@ def run_batch(args):
                     print('Prediction frozen. Reading supplied PIV for comparison.', flush=True)
                     comparison = compare_pair(directory, pair.piv_mat, quality=cfg['piv_quality'],
                                               surface_records=selected_surface)
-                manual_record = manual_for(args.manual_ptv, directory)
+                manual_record = manual_for(args.manual_ptv, directory, acceptance)
                 if manual_record is not None:
                     print('Hand-matched comparison: %d picks, %d passing the screen.'
                           % (manual_record['count'], manual_record['accepted']), flush=True)
@@ -205,7 +205,13 @@ def compare_existing(args):
     with output_lock(directory):
         surface_record=surface_reference(directory,surface_record)
         comparison = compare_pair(directory, args.piv, quality=args.quality, surface_records=surface_record)
-        manual_record = manual_for(getattr(args, 'manual_ptv', None), directory)
+        # compare re-renders a frozen pair, so the profile comes from what that
+        # pair recorded rather than from the command line, which has no flag here.
+        recorded = None
+        summary_path = Path(directory)/'summary.json'
+        if summary_path.exists():
+            recorded = json.loads(summary_path.read_text()).get('acceptance_profile')
+        manual_record = manual_for(getattr(args, 'manual_ptv', None), directory, recorded)
         render_pair(directory, comparison, surface_record, manual_record)
         write_json(directory/'comparison_status.json',dict(status='complete',quality=args.quality,
             PIV_used_in_prediction=False,refitting_performed=False,surface_record=surface_record))

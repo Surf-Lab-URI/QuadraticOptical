@@ -114,3 +114,20 @@ def test_run_signature_accepts_acceptance():
     import inspect
     assert 'acceptance' in inspect.signature(ff.run).parameters
     assert 'acceptance' in inspect.signature(ff.ConservativeEvaluator.__init__).parameters
+
+
+def test_manual_comparison_uses_the_runs_acceptance():
+    """A relaxed run must not be scored against the default rule.
+
+    compare_manual builds its own evaluator, so without threading the profile
+    through it would report a 'passing' subset that disagrees with the pair's
+    own results.npz. This asserts the parameter exists and is forwarded, which
+    is what a test of the statistics alone would miss.
+    """
+    import inspect
+    from quadratic_optical import manual, cli
+    assert 'acceptance' in inspect.signature(manual.compare_manual).parameters
+    body = inspect.getsource(manual.compare_manual)
+    assert 'acceptance=acceptance' in body, 'profile not forwarded to the evaluator'
+    assert 'acceptance' in inspect.signature(cli.manual_for).parameters
+    assert 'acceptance=acceptance' in inspect.getsource(cli.manual_for)

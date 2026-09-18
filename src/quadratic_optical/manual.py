@@ -109,7 +109,7 @@ def _summary(errors, depths, accepted):
             block(shallow & accepted, 'depth < %g px, passing' % SHALLOW_PX)]
 
 
-def compare_manual(directory, manual, requested_depth_m=None):
+def compare_manual(directory, manual, requested_depth_m=None, acceptance=None):
     """Evaluate the frozen field at each manual source position and score it.
 
     The endpoint disagreement is the distance between the predicted arrow
@@ -123,7 +123,11 @@ def compare_manual(directory, manual, requested_depth_m=None):
         requested_depth_m = float(np.asarray(frozen['requested_depth_m']).ravel()[0])
     origin = np.asarray(frozen['origin0'], float).reshape(2) if 'origin0' in frozen.files else np.zeros(2)
     query = record['source_px']-origin
-    evaluator = ConservativeEvaluator(directory, requested_depth_m=requested_depth_m)
+    # The comparison must score the field that was actually produced: scoring a
+    # relaxed run against the default rule would report a screen the pair does
+    # not use, and the 'passing' subsets would not match its own results.npz.
+    evaluator = ConservativeEvaluator(directory, requested_depth_m=requested_depth_m,
+                                      acceptance=acceptance)
     field = evaluator.evaluate_conservative(query)
     predicted = np.asarray(field['disp'], float)
     manual_disp = record['displacement_px']
