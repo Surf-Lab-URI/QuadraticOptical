@@ -10,6 +10,7 @@ Layers are whatever that pair actually has. Every processed pair has the
 image-only field; supplied PIV needs a companion MAT; hand-matched picks exist
 for only a few pairs. Controls show what is present and nothing else.
 """
+import json
 from pathlib import Path
 import base64, html, io, json
 import numpy as np
@@ -119,7 +120,14 @@ def collect(directory, piv_path=None, manual_directory=None, piv_stride=PIV_STRI
             # one-to-one comparison: shared origin, so the gap between arrowheads
             # is the disagreement and its direction.
             from .manual import compare_manual
-            paired = compare_manual(directory, record)
+            # Screen the paired layer with the rule this pair was produced under,
+            # or its 'withheld' split would disagree with the dense layer beside
+            # it on the same page. The pair records what it used.
+            summary_path = Path(directory)/'summary.json'
+            recorded = None
+            if summary_path.exists():
+                recorded = json.loads(summary_path.read_text()).get('acceptance_profile')
+            paired = compare_manual(directory, record, acceptance=recorded)
             predicted = np.asarray(paired['predicted_disp_px'], float)
             passed = np.asarray(paired['accepted_mask'], bool)
             usable = keep & np.isfinite(predicted).all(axis=1)

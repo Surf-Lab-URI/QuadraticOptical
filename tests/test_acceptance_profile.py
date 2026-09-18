@@ -131,3 +131,12 @@ def test_manual_comparison_uses_the_runs_acceptance():
     assert 'acceptance=acceptance' in body, 'profile not forwarded to the evaluator'
     assert 'acceptance' in inspect.signature(cli.manual_for).parameters
     assert 'acceptance=acceptance' in inspect.getsource(cli.manual_for)
+
+
+def test_viewer_paired_layer_uses_the_pairs_acceptance():
+    """The paired layer must be screened like the dense layer on the same page."""
+    import inspect
+    from quadratic_optical import viewer
+    body = inspect.getsource(viewer.collect)
+    assert 'acceptance=recorded' in body, 'viewer scores picks with the default rule'
+    assert "get('acceptance_profile')" in body
