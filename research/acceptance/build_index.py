@@ -1,7 +1,18 @@
 import json, numpy as np
 from pathlib import Path
 Q=Path('/media/surflab/LC_Working24/LC/FabMarcNovDec2014/data/Longitudinal/PIVdt10ms_IRlas1_8hz/ExpLCL_1_03/Results_Surflab/quadratic_optical')
-PAIRS=[(80,'calm'),(100,'calm'),(115,'onset'),(123,'onset'),(125,'waves'),(140,'waves'),(144,'waves')]
+ONSET_=117
+def _tag(n):
+    if n < ONSET_-10: return 'calm'
+    if n <= ONSET_+8: return 'onset'
+    return 'waves'
+# Discover whatever has been screened rather than hard-coding a list, so adding
+# pairs needs no edit here. A pair counts only if both profiles produced it.
+_present=set()
+for _r in ('accept_mild','accept_aggressive'):
+    _present |= {int(d.name.rsplit('_',1)[1]) for d in (Q/_r).glob('ExpLCL_1_03_*')
+                 if (d/'results.npz').exists()}
+PAIRS=[(n,_tag(n)) for n in sorted(_present)]
 ROOTS=[('baseline','analysis_L2'),('mild','accept_mild'),('aggressive','accept_aggressive')]
 ONSET=117
 H=['<title>ExpLCL_1_03 acceptance profiles</title>','<style>',
@@ -53,8 +64,8 @@ H.append('</table>')
 H.append('<p class="note"><b>vs manual</b> is the median distance between the predicted and '
          'hand-matched arrow endpoints, over picks where the rule returned a vector. Its n grows '
          'as the rule relaxes, so compare the medians alongside the counts. '
-         'Pair 144 sits late in the wave evolution where out-of-plane motion prevents good '
-         'near-surface manual estimates; it is included for completeness, not as evidence.</p>')
+         'Pairs past ~130 sit late in the wave evolution where out-of-plane motion prevents '
+         'good near-surface manual estimates; they are included for completeness, not as evidence.</p>')
 H.append('<p class="note">Rebuild with <code>quadratic-optical run &lt;input&gt; --output &lt;new dir&gt; '
          '--acceptance mild</code>. The values applied are recorded in each pair\'s '
          '<code>summary.json</code> under <code>acceptance_profile</code>.</p>')
