@@ -15,7 +15,7 @@ from .core.finalize_fields import ConservativeEvaluator
 from .matio import read_experiment_fields
 from .core.fit_fields import atomic_npz
 
-OF='#d54b28';PIV='#2363b1';MANUAL='#17806d'
+OF='#d54b28';PIV='#2363b1';MANUAL='#17806d';MSV98='#7b4ea3'
 
 # Velocity/gradient field panels. These are presentational settings, held here
 # rather than in the JSON configuration on purpose: every configuration key
@@ -62,12 +62,45 @@ def write_json(path, values):
     temporary.write_text(json.dumps(jsonable(values),indent=2,allow_nan=False)+'\n',encoding='utf8')
     temporary.replace(path)
 
+MSV98_FILE='msv98_profile.npz'
+
+def msv98_profile(directory):
+    """The stored comparison profile for this pair, or None when absent.
+
+    Returns depth below the surface in mm and velocity in cm/s, matching the
+    axes of the mean-velocity panel. Absent for pairs where the constant
+    surface acceleration the profile assumes no longer holds.
+    """
+    path=Path(directory)/MSV98_FILE
+    if not path.exists():return None
+    z=read(path)
+    depth_mm=np.asarray(z['depth_m'],dtype=float).ravel()*1000
+    u_cm=np.asarray(z['u_m_per_s'],dtype=float).ravel()*100
+    good=np.isfinite(depth_mm)&np.isfinite(u_cm)
+    if good.sum()<2:return None
+    order=np.argsort(depth_mm[good])
+    return depth_mm[good][order],u_cm[good][order]
+
 def surface_reference(directory, record=None):
     """Persist the selected observation separately; a later comparison retains it."""
     path=Path(directory)/'surface_ir_reference.json'
     if record is None and path.exists():record=json.loads(path.read_text(encoding='utf8'))
     if record is None:return None
     if not isinstance(record,dict):raise ValueError('IR surface reference must be a selection record.')
+    # The msv98 profile is 1690 samples; keeping it out of the JSON leaves that
+    # file readable, which is the point of linking it from the report.
+    record=dict(record)
+    z=record.pop('msv98_z_m',None);u=record.pop('msv98_u_m_per_s',None)
+    if z is not None and u is not None:
+        z=np.asarray(z,dtype=float).ravel();u=np.asarray(u,dtype=float).ravel()
+        if z.size!=u.size or z.size<2:
+            raise ValueError('The msv98 profile needs matching depth and velocity samples.')
+        atomic_npz(Path(directory)/MSV98_FILE,depth_m=-z,u_m_per_s=u,
+                   reference=np.array(record.get('msv98_reference','Melville, Shear & Veron (1998)')),
+                   note=np.array('Comparison only; laminar profile for a constantly accelerating '
+                                 'surface. Never seeds, constrains or corrects the fitted field.'))
+        record['msv98_profile_file']=MSV98_FILE
+        record['msv98_samples']=int(z.size)
     if record.get('available',False):
         if record.get('selected_field') not in ['USurf.usurf0','USurf.usurffilt']:
             raise ValueError('Only indexed raw or filtered observational IR surface values may be starred.')
@@ -214,34 +247,74 @@ def gradients(directory,s,comparison):
 
 def profiles(directory,comparison,surface_record):
     p=read(directory/'integration_profile.npz');h=p['depth_m']*1000
-    fig,axs=plt.subplots(2,3,figsize=(13,9),sharey=True)
+    msv98=msv98_profile(directory)
     total_width=float(p['target_full_width_m'])
     if comparison is None:
         bands=p['common_depth_band_actual_m']*1000
-        rows=[(p['covered_segment_integral_assumed_m2_per_s'],p['covered_width_mean_u_assumed_m_per_s'],
-               p['coverage_fraction'],None,None,'Accepted intervals at each depth'),
-              (p['common_domain_integral_assumed_m2_per_s'],p['common_domain_mean_u_assumed_m_per_s'],
-               np.where(p['common_domain_available_at_depth'],float(p['common_domain_width_m'])/total_width,np.nan),
-               None,None,'Fixed common horizontal domain')]
+        rows=[dict(integral=p['covered_segment_integral_assumed_m2_per_s'],
+                   mean=p['covered_width_mean_u_assumed_m_per_s'],width=p['coverage_fraction'],
+                   piv_integral=None,piv_mean=None,piv_width=None,
+                   label='Image-only optical flow',piv_label=None,
+                   title='Accepted intervals at each depth'),
+              dict(integral=p['common_domain_integral_assumed_m2_per_s'],
+                   mean=p['common_domain_mean_u_assumed_m_per_s'],
+                   width=np.where(p['common_domain_available_at_depth'],float(p['common_domain_width_m'])/total_width,np.nan),
+                   piv_integral=None,piv_mean=None,piv_width=None,
+                   label='Image-only optical flow',piv_label=None,
+                   title='Fixed common horizontal domain')]
     else:
         c=comparison['integrals']
         if not np.array_equal(c['depth_m'],p['depth_m']):raise ValueError('Comparison profile depths differ from the frozen integral samples.')
         bands=c['common_depth_band_m']*1000
-        rows=[(c['of_matched_integral_m2_per_s'],c['of_matched_mean_u_m_per_s'],c['matched_width_m']/total_width,
-               c['piv_matched_integral_m2_per_s'],c['piv_matched_mean_u_m_per_s'],'Shared intervals at each depth'),
-              (c['of_common_integral_m2_per_s'],c['of_common_mean_u_m_per_s'],
-               np.where(c['common_available_at_depth'],float(c['common_width_m'])/total_width,np.nan),
-               c['piv_common_integral_m2_per_s'],c['piv_common_mean_u_m_per_s'],'Fixed common horizontal domain')]
-    for axes,(integral,mean,width,piv_integral,piv_mean,title) in zip(axs,rows):
+        # Each method on everything it has. Not a like-for-like comparison --
+        # the two average over different stretches -- but it is each method's
+        # best available profile, which the matched rows deliberately are not.
+        rows=[dict(integral=c['of_original_integral_m2_per_s'],mean=c['of_original_mean_u_m_per_s'],
+                   width=c['of_original_width_m']/total_width,
+                   piv_integral=c['piv_own_integral_m2_per_s'],piv_mean=c['piv_own_mean_u_m_per_s'],
+                   piv_width=c['piv_own_width_m']/total_width,
+                   label='Image-only optical flow (all accepted)',piv_label='PIV (all its own data)',
+                   title='Each method on all of its own data — best available profile'),
+              dict(integral=c['of_matched_integral_m2_per_s'],mean=c['of_matched_mean_u_m_per_s'],
+                   width=c['matched_width_m']/total_width,
+                   piv_integral=c['piv_matched_integral_m2_per_s'],piv_mean=c['piv_matched_mean_u_m_per_s'],
+                   piv_width=None,
+                   label='Image-only optical flow',piv_label='PIV on identical intervals',
+                   title='Shared intervals at each depth'),
+              dict(integral=c['of_common_integral_m2_per_s'],mean=c['of_common_mean_u_m_per_s'],
+                   width=np.where(c['common_available_at_depth'],float(c['common_width_m'])/total_width,np.nan),
+                   piv_integral=c['piv_common_integral_m2_per_s'],piv_mean=c['piv_common_mean_u_m_per_s'],
+                   piv_width=None,
+                   label='Image-only optical flow',piv_label='PIV on identical intervals',
+                   title='Fixed common horizontal domain')]
+    fig,axs=plt.subplots(len(rows),3,figsize=(13,4.5*len(rows)),sharey=True)
+    for axes,row in zip(np.atleast_2d(axs),rows):
+        integral,mean,width=row['integral'],row['mean'],row['width']
+        piv_integral,piv_mean,title=row['piv_integral'],row['piv_mean'],row['title']
+        populated=np.isfinite(integral).any() or (piv_integral is not None and np.isfinite(piv_integral).any())
         if piv_integral is not None:
-            axes[0].plot(piv_integral*1e4,h,color=PIV,ls='--',label='PIV on identical intervals')
-            axes[1].plot(piv_mean*100,h,color=PIV,ls='--',label='PIV on identical intervals')
-        axes[0].plot(integral*1e4,h,color=OF,label='Image-only optical flow')
-        axes[1].plot(mean*100,h,color=OF,label='Image-only optical flow')
-        axes[2].plot(width*100,h,color='#34434a',label='Horizontal width used')
-        if not np.isfinite(integral).any():
+            axes[0].plot(piv_integral*1e4,h,color=PIV,ls='--',label=row['piv_label'])
+            axes[1].plot(piv_mean*100,h,color=PIV,ls='--',label=row['piv_label'])
+            if row['piv_width'] is not None:
+                axes[2].plot(row['piv_width']*100,h,color=PIV,ls='--',label='PIV width used')
+        axes[0].plot(integral*1e4,h,color=OF,label=row['label'])
+        axes[1].plot(mean*100,h,color=OF,label=row['label'])
+        axes[2].plot(width*100,h,color='#34434a',
+                     label='Optical-flow width used' if row['piv_width'] is not None else 'Horizontal width used')
+        if not populated:
             for ax in axes:ax.text(.5,.5,'No supported domain',ha='center',va='center',transform=ax.transAxes,color='#68757e')
-        if surface_record and surface_record.get('available',False):
+        # Comparison references are drawn only where there is a measured curve
+        # to compare them against: alone in an empty panel they make it look
+        # populated when it holds nothing.
+        if msv98 is not None and populated:
+            # Trimmed to the plotted depth range so it cannot widen the shared
+            # x limits with the deep tail the panel never shows.
+            depth_mm,u_cm=msv98
+            inside=depth_mm<=h[-1]
+            if inside.sum()>1:
+                axes[1].plot(u_cm[inside],depth_mm[inside],color=MSV98,ls=(0,(4,2)),lw=1.6,
+                             zorder=6,label='Melville, Shear & Veron (1998)')
+        if populated and surface_record and surface_record.get('available',False):
             velocity=float(surface_record['velocity_m_per_s'])*100
             label='IR surface (smoothed)' if surface_record['selected_field']=='USurf.usurffilt' else 'IR surface (raw fresh-dot)'
             axes[1].scatter([velocity],[0],marker='*',s=180,color='#edbd36',edgecolor='#222',zorder=10,clip_on=False,label=label)
@@ -261,11 +334,19 @@ def profiles(directory,comparison,surface_record):
         axes[0].set_xlabel('Horizontal integral (cm²/s)');axes[1].set_xlabel('Mean horizontal velocity (cm/s)')
         axes[2].set_xlabel('Horizontal coverage (%)');axes[2].set_xlim(0,101)
         axes[0].set_ylabel('Depth below local surface (mm)')
-    fig.suptitle(directory.name+' · depth profiles',x=.08,ha='left')
+    # Row titles sit immediately above each axes, so the figure title needs its
+    # own band of space above the first one rather than the default placement.
+    height=4.5*len(rows)
+    fig.suptitle(directory.name+' · depth profiles',x=.08,ha='left',y=1-.22/height)
+    # Notes sit a fixed distance from the bottom edge, so their placement has to
+    # scale with the figure height rather than stay at the two-row fractions.
     band_note='Fixed domain: intersection of supported horizontal intervals across %.3g–%.3g mm depth.'%tuple(bands)
-    fig.text(.08,.055,band_note,fontsize=8)
-    fig.text(.08,.035,'No missing segments are filled. Surface stars are comparisons only; they do not constrain the field. '+quality_label(comparison),fontsize=8)
-    fig.subplots_adjust(left=.08,right=.98,bottom=.13,top=.93,wspace=.25,hspace=.34);save(fig,directory,'profiles')
+    fig.text(.08,.60/height,band_note,fontsize=8)
+    fig.text(.08,.38/height,'No missing segments are filled. Surface stars are comparisons only; they do not constrain the field. '+quality_label(comparison),fontsize=8)
+    if len(rows)>2:
+        fig.text(.08,.16/height,'Top row averages each method over everything it has, so the two cover different '
+                 'stretches and are not a like-for-like comparison; it is each method\'s best available profile.',fontsize=8)
+    fig.subplots_adjust(left=.08,right=.98,bottom=1.17/height,top=1-.95/height,wspace=.25,hspace=.34);save(fig,directory,'profiles')
     savemat(str(directory/'horizontal_integral.mat'),p,long_field_names=True,do_compression=True)
 
 

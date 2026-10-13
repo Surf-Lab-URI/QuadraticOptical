@@ -20,7 +20,12 @@ def test_campaign_selected_run_and_raw_filtered_missing(tmp_path, compressed):
     savemat(p,dict(exps=exps),do_compression=compressed)
     records=select_surface_values(p,'test',[0,80,100,9])
     assert [r['status'] for r in records]==['selected','selected','no_finite_surface_value','pair_not_found']
-    assert records[0]['selected_field']=='USurf.usurf0' and records[0]['velocity_m_per_s']==.11
+    # The filtered estimate is preferred even though a raw value exists here;
+    # the raw one stays recorded so the rejected observation is still visible.
+    assert records[0]['selected_field']=='USurf.usurffilt' and records[0]['velocity_m_per_s']==.12
+    assert records[0]['indexed_raw_usurf0_m_per_s']==.11
+    assert records[0]['raw_observation_available_at_index'] is True
+    assert records[0]['representation']=='smoothed IR surface estimate'
     assert records[1]['selected_field']=='USurf.usurffilt' and records[1]['velocity_m_per_s']==.22
     assert records[1]['IR_index_matlab']==2 and records[1]['IR_index_python']==1
     assert records[1]['PIV_row_matlab']==2 and records[1]['PIV_B_time_s']==1.02
@@ -72,7 +77,7 @@ def test_hdf5_campaign_cells_and_run_top_level(tmp_path):
         other=h5_run(f,'r1',run('other'));target=h5_run(f,'r2',run())
         exps=f.create_dataset('exps',(2,1),dtype=h5py.ref_dtype);exps[0,0]=other.ref;exps[1,0]=target.ref
     rows=select_surface_values(p,'test',[0,80])
-    assert rows[0]['velocity_m_per_s']==.11 and rows[1]['velocity_m_per_s']==.22
+    assert rows[0]['velocity_m_per_s']==.12 and rows[1]['velocity_m_per_s']==.22
     assert rows[1]['source_format']=='v7.3' and rows[1]['experiment_index_matlab']==2
     fields,meta=read_experiment_fields(p,'test',['USurf.usurf0'])
     assert set(fields)=={'exp_name','USurf.usurf0'}
@@ -89,3 +94,27 @@ def test_hdf5_top_level_scalar_struct_references(tmp_path):
     row=select_surface_values(p,'test',[80])[0]
     assert row['velocity_m_per_s']==.22 and row['experiment_identity_verified']
     assert row['experiment_index_matlab'] is None
+
+
+def test_filtered_is_preferred_and_raw_is_only_a_fallback(tmp_path):
+    """Pin the preference itself, in both directions.
+
+    The raw fresh-dot value rests on one to three dots and scatters by about
+    0.037 m/s against the filtered series, so it must not win where both exist.
+    It must still be used where the filtered value is absent, so that a file
+    without a filtered series is not silently left blank.
+    """
+    both=run()
+    both['USurf']['usurf0']=[.11,np.nan,np.nan]
+    both['USurf']['usurffilt']=[.12,.22,np.nan]
+    p=tmp_path/'both.mat';savemat(p,both,do_compression=True)
+    r=select_surface_values(p,'test',[0])[0]
+    assert r['selected_field']=='USurf.usurffilt' and r['velocity_m_per_s']==.12
+
+    only_raw=run()
+    only_raw['USurf']['usurf0']=[.11,np.nan,np.nan]
+    only_raw['USurf']['usurffilt']=[np.nan,.22,np.nan]
+    q=tmp_path/'raw_only.mat';savemat(q,only_raw,do_compression=True)
+    r2=select_surface_values(q,'test',[0])[0]
+    assert r2['selected_field']=='USurf.usurf0' and r2['velocity_m_per_s']==.11
+    assert r2['representation']=='raw fresh-dot IR surface observation'

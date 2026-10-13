@@ -20,6 +20,16 @@ PIVDIR=Path(sys.argv[6]) if len(sys.argv)>6 and sys.argv[6]!='-' else None
 # Hand-matched picks are read only after the prediction is frozen, and only a
 # few pairs have any; manual_for keys off the pair's own frozen manifest.
 MANUAL=sys.argv[7] if len(sys.argv)>7 and sys.argv[7]!='-' else None
+# The IR surface record must be rebuilt, not inherited: a copied
+# surface_ir_reference.json carries whichever field the ORIGINAL run chose, so
+# a change of preference would silently not reach these directories.
+IRRESULTS=sys.argv[8] if len(sys.argv)>8 and sys.argv[8]!='-' else None
+EXPERIMENT=sys.argv[9] if len(sys.argv)>9 and sys.argv[9]!='-' else 'ExpLCL_1_03'
+_ir_rows={}
+if IRRESULTS:
+    from quadratic_optical.ir import select_surface_values
+    for _r in select_surface_values(IRRESULTS, EXPERIMENT, PAIRS):
+        _ir_rows[int(_r['pair_number_zero_based'])]=_r
 DST.mkdir(parents=True, exist_ok=True)
 for n in PAIRS:
     name=SRC.name.replace('analysis_L2','') or None
@@ -33,7 +43,9 @@ for n in PAIRS:
           'tracking_summary.json','particle_candidates.npz','tracks_forward.npz',
           'tracks_reverse.npz','fit_summary.json','coarse_affine.npz','coarse_search.npz',
           'seeds.npz','bootstrap_sensitivity.json','coarse_bootstrap48.npz',
-          'source_access_audit.json','surface_ir_reference.json'}
+          'source_access_audit.json'}
+    if not IRRESULTS:
+        keep=keep|{'surface_ir_reference.json','msv98_profile.npz'}
     dst.mkdir(parents=True)
     for f in src.iterdir():
         if f.name in keep and f.is_file(): shutil.copy2(f,dst/f.name)
@@ -42,7 +54,7 @@ for n in PAIRS:
     integrate_profile.run(dst, requested_depth_m=CFG['depth_m'],
         interval_px=CFG['integration_interval_px'], depth_step_m=CFG['depth_step_m'],
         acceptance=PROFILE)
-    sel=surface_reference(dst,None)
+    sel=surface_reference(dst,_ir_rows.get(n))
     comparison=None
     if PIVDIR is not None:
         piv=PIVDIR/('ExpLCL_1_03_%d_PIV.mat'%n)

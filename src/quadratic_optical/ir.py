@@ -8,7 +8,12 @@ _FIELDS = [
     "Surfs.pairNum", "Surfs.IR_idx", "Surfs.t", "Surfs.dt_pair", "Surfs.spp",
     "USurf.t", "USurf.usurf0", "USurf.usurffilt", "USurf.IRfps", "USurf.IRDX",
     "USurf.Ndots_used", "USurf.corrmax0", "USurf.TMVTech",
+    # Melville, Shear & Veron (1998) laminar profile for a constantly
+    # accelerating surface, one column per PIV pair. Comparison only, like the
+    # surface star: it never seeds, constrains or corrects the fitted field.
+    "PIV.U_msv98", "PIV.z_msv98",
 ]
+_PROFILE_FIELDS = ("PIV.U_msv98", "PIV.z_msv98")
 
 
 def _finite(value):
@@ -19,8 +24,8 @@ def select_surface_values(path, experiment, pair_numbers):
     """Return one explicit selection record per requested zero-based PIV pair.
 
     Pair numbers are matched to stored ``PIV.pairNum``; ``PIV.IR_idx`` is a
-    MATLAB one-based index into ``USurf``. A finite indexed ``usurf0`` is used
-    first, otherwise finite ``usurffilt``. Nothing substitutes a neighboring raw
+    MATLAB one-based index into ``USurf``. A finite indexed ``usurffilt`` is
+    used first, otherwise finite ``usurf0``. Nothing substitutes a neighboring raw
     time, theoretical profile, composite method, or a guessed IR index. Missing
     data give ``available=False`` and a reason, never a fabricated observation.
 
@@ -34,8 +39,11 @@ def select_surface_values(path, experiment, pair_numbers):
     if any(not np.isfinite(p) or int(p) != p or p < 0 for p in requested):
         raise ValueError("pair_numbers must contain nonnegative integer labels")
     values, metadata = read_experiment_fields(path, experiment, _FIELDS)
+    # The profile is two-dimensional and must not be flattened with the vectors.
+    profile_u = values.get("PIV.U_msv98")
+    profile_z = values.get("PIV.z_msv98")
     arrays = {key: np.asarray(value).ravel(order="F") for key, value in values.items()
-              if key != "exp_name"}
+              if key != "exp_name" and key not in _PROFILE_FIELDS}
     def at(key, index):
         array = arrays.get(key)
         return None if array is None or index < 0 or index >= len(array) else _finite(array[index])
@@ -74,6 +82,26 @@ def select_surface_values(path, experiment, pair_numbers):
             row["status"] = "pair_not_found"
             continue
         j = int(matches[0]); row["PIV_row_matlab"] = j + 1
+        # read_experiment_fields restores MATLAB orientation, so the profile
+        # arrives as (pairs, depths). Verify that against the two lengths we
+        # already know rather than trusting it: a silent transpose would plot a
+        # depth series as if it were a pair series and look plausible.
+        if profile_u is not None and profile_z is not None:
+            u2 = np.asarray(profile_u, dtype=float)
+            z1 = np.asarray(profile_z, dtype=float).ravel()
+            n_pairs = len(arrays["PIV.pairNum"])
+            if u2.ndim == 2 and u2.shape == (n_pairs, z1.size) and z1.size > 1:
+                column = u2[j]
+                if np.isfinite(column).any() and np.isfinite(z1).all():
+                    row["msv98_z_m"] = z1
+                    row["msv98_u_m_per_s"] = column
+                    row["msv98_reference"] = "Melville, Shear & Veron (1998)"
+                else:
+                    row["msv98_status"] = ("no finite profile at this pair"
+                                           if not np.isfinite(column).any() else "nonfinite depths")
+            else:
+                row["msv98_status"] = ("unexpected msv98 shape %s against %d pairs and %d depths"
+                                       % (u2.shape, n_pairs, z1.size))
         index = at("PIV.IR_idx", j)
         row["PIV_A_time_s"] = at("PIV.t", j)
         if index is None or index < 1 or int(index) != index:
@@ -94,14 +122,23 @@ def select_surface_values(path, experiment, pair_numbers):
         if "USurf.t" in arrays and k >= len(arrays["USurf.t"]):
             row["status"] = "IR_index_out_of_range"
             continue
-        chosen = "USurf.usurf0" if raw is not None else ("USurf.usurffilt" if filtered is not None else None)
-        value = raw if raw is not None else filtered
+        # The filtered estimate is preferred even where a raw fresh-dot value
+        # exists. Each raw value rests on one to three dots, and measured
+        # against the filtered series it scatters with a standard deviation of
+        # about 0.037 m/s on a surface speed of 0.10-0.19 m/s, while its mean
+        # difference is 0.0004 m/s -- unbiased but far too noisy to star a
+        # single pair against a velocity profile. In the ExpLCL_1_03 file a
+        # filtered value exists at every sample where a raw one does, so this
+        # preference never discards an observation; the raw fallback remains
+        # for a file where that is not true.
+        chosen = "USurf.usurffilt" if filtered is not None else ("USurf.usurf0" if raw is not None else None)
+        value = filtered if filtered is not None else raw
         row.update(selected_field=chosen, velocity_m_per_s=value,
             selected_surface_velocity_m_per_s=value, available=value is not None,
             status="selected" if value is not None else "no_finite_surface_value",
             raw_observation_available_at_index=raw is not None,
-            representation=("raw fresh-dot IR surface observation" if raw is not None else
-                "smoothed IR surface estimate" if filtered is not None else None))
+            representation=("smoothed IR surface estimate" if filtered is not None else
+                "raw fresh-dot IR surface observation" if raw is not None else None))
         a_time, ir_time = row["PIV_A_time_s"], row["IR_sample_time_s"]
         if a_time is not None and ir_time is not None:
             row["IR_time_minus_PIV_A_s"] = ir_time - a_time
