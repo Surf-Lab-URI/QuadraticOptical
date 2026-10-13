@@ -33,7 +33,7 @@ if IRRESULTS:
 DST.mkdir(parents=True, exist_ok=True)
 for n in PAIRS:
     name=SRC.name.replace('analysis_L2','') or None
-    src=SRC/('ExpLCL_1_03_%d'%n); dst=DST/src.name
+    src=SRC/('%s_%d'%(EXPERIMENT,n)); dst=DST/src.name
     t0=time.time()
     # NOTE: this wipes the directory, so anything not in `keep` below is lost --
     # viewer.html included. That is deliberate (a stale viewer would show the
@@ -62,7 +62,7 @@ for n in PAIRS:
     sel=surface_reference(dst,_ir_rows.get(n))
     comparison=None
     if PIVDIR is not None:
-        piv=PIVDIR/('ExpLCL_1_03_%d_PIV.mat'%n)
+        piv=PIVDIR/('%s_%d_PIV.mat'%(EXPERIMENT,n))
         if piv.exists():
             try: comparison=compare_pair(dst,piv,quality=CFG['piv_quality'],surface_records=sel)
             except Exception as e: print('  PIV comparison skipped:',e)
