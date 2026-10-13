@@ -35,6 +35,11 @@ for n in PAIRS:
     name=SRC.name.replace('analysis_L2','') or None
     src=SRC/('ExpLCL_1_03_%d'%n); dst=DST/src.name
     t0=time.time()
+    # NOTE: this wipes the directory, so anything not in `keep` below is lost --
+    # viewer.html included. That is deliberate (a stale viewer would show the
+    # previous screening's vectors), but it means the viewer MUST be rebuilt
+    # afterwards. Forgetting that once left the profile columns with no viewer
+    # links at all.
     if dst.exists(): shutil.rmtree(dst)
     # Copy only what the post-fit stages need; skip prior outputs so nothing
     # stale can survive into the new screening.
