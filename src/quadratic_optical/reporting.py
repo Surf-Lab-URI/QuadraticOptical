@@ -62,6 +62,50 @@ def write_json(path, values):
     temporary.write_text(json.dumps(jsonable(values),indent=2,allow_nan=False)+'\n',encoding='utf8')
     temporary.replace(path)
 
+ANCHORED_WINDOW_MM=1.0
+ANCHORED_FILE='anchored_profile.npz'
+ANCHOR='#0f8a8a'
+
+def anchored_profile(depth_mm,u_cm,ir_cm,window_mm=ANCHORED_WINDOW_MM):
+    """Lightly smoothed QO profile, joined by a straight line to the IR surface.
+
+    The average runs ALONG THE CURVE: both depth and velocity are averaged over
+    the same window, so neither axis is privileged. That was chosen over
+    averaging u at fixed depth because the raw profile often turns back on
+    itself in the top tenth of a millimetre -- velocity rising with depth --
+    which neighbouring frames do not show, so it is taken to be noise rather
+    than structure. Averaging along the curve pulls the end of the curve back
+    to where it is well behaved instead of preserving a spurious reversal.
+
+    The cost, which is real and deliberate: the shallowest point moves deeper,
+    typically 0.3 mm to about 0.55 mm at a 1 mm window, so the straight line to
+    the surface spans more. Nothing is extrapolated past that line, and no
+    value is invented between samples.
+
+    Returns (depth_mm, u_cm) including the surface point, or None when there is
+    no IR value to anchor to or too little profile to smooth.
+    """
+    depth_mm=np.asarray(depth_mm,dtype=float); u_cm=np.asarray(u_cm,dtype=float)
+    good=np.isfinite(depth_mm)&np.isfinite(u_cm)
+    if good.sum()<3 or ir_cm is None or not np.isfinite(ir_cm):return None
+    d=depth_mm[good];v=u_cm[good]
+    order=np.argsort(d);d=d[order];v=v[order]
+    steps=np.diff(d)
+    step=float(np.median(steps)) if len(steps) else 0.
+    if not np.isfinite(step) or step<=0:return None
+    n=max(1,int(round(window_mm/step)))
+    half=n//2
+    ds=np.empty_like(d);vs=np.empty_like(v)
+    for i in range(len(d)):
+        lo=max(0,i-half);hi=min(len(d),i+half+1)
+        ds[i]=d[lo:hi].mean();vs[i]=v[lo:hi].mean()
+    # The smoothed depths stay ordered for a monotone input depth axis, but
+    # guard anyway so the drawn curve can never double back.
+    keep=np.r_[True,np.diff(ds)>0]
+    ds,vs=ds[keep],vs[keep]
+    if ds[0]<=0:return np.r_[ds],np.r_[vs]
+    return np.r_[0.,ds],np.r_[float(ir_cm),vs]
+
 MSV98_FILE='msv98_profile.npz'
 
 def msv98_profile(directory):
@@ -267,6 +311,7 @@ def profiles(directory,comparison,surface_record):
                    piv_integral=c['piv_own_integral_m2_per_s'],piv_mean=c['piv_own_mean_u_m_per_s'],
                    piv_width=c['piv_own_width_m']/total_width,
                    label='Image-only optical flow (all accepted)',piv_label='PIV (all its own data)',
+                   anchor=True,
                    title='Each method on all of its own data — best available profile'),
               dict(integral=c['of_matched_integral_m2_per_s'],mean=c['of_matched_mean_u_m_per_s'],
                    width=c['matched_width_m']/total_width,
@@ -304,6 +349,22 @@ def profiles(directory,comparison,surface_record):
         if populated and surface_record and surface_record.get('available',False):
             velocity=float(surface_record['velocity_m_per_s'])*100
             label='IR surface (smoothed)' if surface_record['selected_field']=='USurf.usurffilt' else 'IR surface (raw fresh-dot)'
+            if row.get('anchor') and np.isfinite(mean).any():
+                anchored=anchored_profile(h,mean*100,velocity)
+                if anchored is not None:
+                    ad,av=anchored
+                    axes[1].plot(av,ad,color=ANCHOR,lw=2.,zorder=8,
+                                 label='QO smoothed, anchored to IR (%.1f mm)'%ANCHORED_WINDOW_MM)
+                    atomic_npz(Path(directory)/ANCHORED_FILE,depth_mm=ad,u_cm_per_s=av,
+                        depth_m=ad/1000.,u_m_per_s=av/100.,
+                        window_mm=np.array(ANCHORED_WINDOW_MM),
+                        ir_surface_cm_per_s=np.array(velocity),
+                        source=np.array('of_original_mean_u_m_per_s' if comparison is not None
+                                        else 'covered_width_mean_u_assumed_m_per_s'),
+                        note=np.array('Moving average along the curve (depth and velocity averaged over the '
+                                      'same window), then a straight line from the shallowest smoothed point '
+                                      'to the IR surface velocity at zero depth. Comparison-only inputs; the '
+                                      'fitted field is unchanged.'))
             axes[1].scatter([velocity],[0],marker='*',s=180,color='#edbd36',edgecolor='#222',zorder=10,clip_on=False,label=label)
         for ax in axes:
             ax.set_ylim(h[-1],-.06*h[-1]);ax.grid(alpha=.2);ax.legend(loc='lower right',fontsize=7)

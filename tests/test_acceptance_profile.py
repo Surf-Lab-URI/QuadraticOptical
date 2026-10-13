@@ -178,3 +178,32 @@ def test_every_evaluator_construction_can_take_a_profile():
             if 'acceptance' not in m.group(1):
                 offenders.append('%s: %s' % (path.name, m.group(1)[:70].replace('\n', ' ')))
     assert not offenders, 'evaluator built without an acceptance profile:\n' + '\n'.join(offenders)
+
+
+def test_anchored_profile_smooths_along_the_curve_and_anchors_to_ir():
+    """Pin the product's defining behaviour, not its arithmetic.
+
+    Averaging along the curve means depth moves too, so the shallowest point
+    ends up deeper than the raw one. That is the deliberate cost of removing
+    the velocity reversal that appears in the top tenth of a millimetre and is
+    absent from neighbouring frames.
+    """
+    import numpy as np
+    from quadratic_optical.reporting import anchored_profile, ANCHORED_WINDOW_MM
+    depth = np.arange(0.3, 20.01, 0.1)
+    u = 18 * np.exp(-depth / 3.0)
+    u[0] -= 0.4                      # the spurious turn-back at the top
+    got = anchored_profile(depth, u, 18.27)
+    assert got is not None
+    d, v = got
+    assert d[0] == 0.0 and v[0] == 18.27, 'must start at the IR value on the surface'
+    assert np.all(np.diff(d) > 0), 'the drawn curve must never double back'
+    assert v[1] > v[2], 'velocity must fall with depth once the reversal is gone'
+    assert d[1] > depth[0], 'averaging along the curve moves the top point deeper'
+    assert ANCHORED_WINDOW_MM == 1.0
+
+    # Without an IR value there is nothing to anchor to, so there is no product.
+    assert anchored_profile(depth, u, None) is None
+    assert anchored_profile(depth, u, float('nan')) is None
+    # Too little profile to smooth must not produce a two-point fiction.
+    assert anchored_profile(depth[:2], u[:2], 18.27) is None
