@@ -250,22 +250,15 @@ def profiles(directory,comparison,surface_record):
     msv98=msv98_profile(directory)
     total_width=float(p['target_full_width_m'])
     if comparison is None:
-        bands=p['common_depth_band_actual_m']*1000
         rows=[dict(integral=p['covered_segment_integral_assumed_m2_per_s'],
                    mean=p['covered_width_mean_u_assumed_m_per_s'],width=p['coverage_fraction'],
                    piv_integral=None,piv_mean=None,piv_width=None,
                    label='Image-only optical flow',piv_label=None,
                    title='Accepted intervals at each depth'),
-              dict(integral=p['common_domain_integral_assumed_m2_per_s'],
-                   mean=p['common_domain_mean_u_assumed_m_per_s'],
-                   width=np.where(p['common_domain_available_at_depth'],float(p['common_domain_width_m'])/total_width,np.nan),
-                   piv_integral=None,piv_mean=None,piv_width=None,
-                   label='Image-only optical flow',piv_label=None,
-                   title='Fixed common horizontal domain')]
+]
     else:
         c=comparison['integrals']
         if not np.array_equal(c['depth_m'],p['depth_m']):raise ValueError('Comparison profile depths differ from the frozen integral samples.')
-        bands=c['common_depth_band_m']*1000
         # Each method on everything it has. Not a like-for-like comparison --
         # the two average over different stretches -- but it is each method's
         # best available profile, which the matched rows deliberately are not.
@@ -280,13 +273,7 @@ def profiles(directory,comparison,surface_record):
                    piv_integral=c['piv_matched_integral_m2_per_s'],piv_mean=c['piv_matched_mean_u_m_per_s'],
                    piv_width=None,
                    label='Image-only optical flow',piv_label='PIV on identical intervals',
-                   title='Shared intervals at each depth'),
-              dict(integral=c['of_common_integral_m2_per_s'],mean=c['of_common_mean_u_m_per_s'],
-                   width=np.where(c['common_available_at_depth'],float(c['common_width_m'])/total_width,np.nan),
-                   piv_integral=c['piv_common_integral_m2_per_s'],piv_mean=c['piv_common_mean_u_m_per_s'],
-                   piv_width=None,
-                   label='Image-only optical flow',piv_label='PIV on identical intervals',
-                   title='Fixed common horizontal domain')]
+                   title='Shared intervals at each depth')]
     fig,axs=plt.subplots(len(rows),3,figsize=(13,4.5*len(rows)),sharey=True)
     for axes,row in zip(np.atleast_2d(axs),rows):
         integral,mean,width=row['integral'],row['mean'],row['width']
@@ -340,10 +327,8 @@ def profiles(directory,comparison,surface_record):
     fig.suptitle(directory.name+' · depth profiles',x=.08,ha='left',y=1-.22/height)
     # Notes sit a fixed distance from the bottom edge, so their placement has to
     # scale with the figure height rather than stay at the two-row fractions.
-    band_note='Fixed domain: intersection of supported horizontal intervals across %.3g–%.3g mm depth.'%tuple(bands)
-    fig.text(.08,.60/height,band_note,fontsize=8)
     fig.text(.08,.38/height,'No missing segments are filled. Surface stars are comparisons only; they do not constrain the field. '+quality_label(comparison),fontsize=8)
-    if len(rows)>2:
+    if comparison is not None:
         fig.text(.08,.16/height,'Top row averages each method over everything it has, so the two cover different '
                  'stretches and are not a like-for-like comparison; it is each method\'s best available profile.',fontsize=8)
     fig.subplots_adjust(left=.08,right=.98,bottom=1.17/height,top=1-.95/height,wspace=.25,hspace=.34);save(fig,directory,'profiles')
