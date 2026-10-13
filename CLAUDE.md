@@ -530,3 +530,36 @@ water. Comparisons between runs, and within a run, are unaffected.
 FILETIME: the 13 runs were recorded 2014-12-03 17:25:57 to 22:09:29, in strict
 block order about 21 min apart. Block, elapsed time and forcing level therefore
 vary together and cannot be separated with 13 runs.
+
+## Writing into a MATLAB v7.3 file
+
+`research/acceptance/write_qo_fields.py` adds the QO profile products to a run
+results file. Two things about the format cost real time to discover.
+
+**A struct's field list lives in an attribute, not in the group.** A v7.3 struct
+is an HDF5 group, but MATLAB reads its field names from the group's
+`MATLAB_fields` attribute — a variable-length array of `S1` arrays, one per
+name. A dataset created in the group without updating that attribute is
+completely invisible from MATLAB while remaining perfectly visible to h5py, to
+`read_experiment_fields`, and to every Python check you might write. Ten arrays
+were written this way and verified five different ways in Python before anything
+noticed. What caught it was a MATLAB script reporting the fields absent while
+h5py reported them present: the two tools disagreeing. `register_fields()`
+merges new names into the attribute, and the writer refuses to finish if its
+array fields are not listed afterwards.
+
+**Dimensions are stored reversed.** A MATLAB `[432 x 201]` array is an HDF5
+dataset of shape `(201, 432)`. `read_experiment_fields` transposes back, so
+through it the array arrives in MATLAB orientation — which is the opposite of
+what raw h5py gives you. Check an orientation against two known lengths rather
+than assuming; a silent transpose of a profile looks plausible.
+
+Char data is `uint16` with `MATLAB_class='char'` and `MATLAB_int_decode=2`.
+Doubles need `MATLAB_class='double'` and `H5PATH` set to the parent group.
+
+**Deleting is not the inverse of writing.** `del group[name]` unlinks the name
+but does not reclaim the space, and pruning a reference graph by hand risks
+breaking objects stored in `/#refs#` and `/#subsystem#` — `Surfs.paths` is a
+MATLAB `string` object that lives there. Re-saving from MATLAB
+(`research/acceptance/clean_run_results.m`) rebuilds the file instead, which
+both reclaims the space and reconstitutes the objects correctly.
