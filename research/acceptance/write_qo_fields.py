@@ -36,6 +36,28 @@ Z_MAX_MM = 20.0
 ACCEPTANCE = 'aggressive'
 
 
+def register_fields(group, names):
+    """Add names to a struct group's MATLAB_fields attribute, preserving order.
+
+    MATLAB reads a v7.3 struct's field list from this attribute, NOT from the
+    HDF5 group listing. A dataset added without updating it is invisible from
+    MATLAB while remaining perfectly visible to h5py -- which is exactly how
+    this was missed the first time. The attribute is a variable-length array of
+    S1 arrays, one per field name.
+    """
+    existing = []
+    if 'MATLAB_fields' in group.attrs:
+        for entry in group.attrs['MATLAB_fields']:
+            existing.append(b''.join(bytes(c) for c in entry).decode())
+    merged = existing + [n for n in names if n not in existing]
+    vlen = h5py.special_dtype(vlen=np.dtype('S1'))
+    packed = np.empty(len(merged), dtype=vlen)
+    for i, name in enumerate(merged):
+        packed[i] = np.array([c.encode('ascii') for c in name], dtype='S1')
+    group.attrs.create('MATLAB_fields', packed)
+    return merged
+
+
 def matlab_double(group, name, array):
     """Create a MATLAB-readable double dataset. HDF5 stores dims reversed."""
     data = np.asarray(array, dtype=np.float64)
@@ -197,12 +219,26 @@ def main():
                     'fixed pre-flow row used by U_msv98PIV. NaN where no profile exists. '
                     'See PIVFileContents.md.')
 
+        # Without this the ten datasets above exist in the file but MATLAB
+        # does not list them as fields of PIV.
+        fields = register_fields(piv, ['U_QO', 'U_QOIR', 'z_QOIR', 'U_QOIRPIV',
+                                       'QO_window_mm', 'QO_pairs_written', 'QO_commit',
+                                       'QO_acceptance', 'QO_written', 'QO_note'])
+
     after = digest(results, existing)
     changed = [k for k in existing if before[k] != after[k]]
     if changed:
         raise SystemExit('EXISTING DATA CHANGED: ' + ', '.join(changed) + ' -- restore from ' + str(backup))
     print('existing datasets unchanged (%d checked)' % len(existing))
     print('commit recorded: %s' % commit[:12])
+    with h5py.File(results, 'r') as handle:
+        listed = [b''.join(bytes(c) for c in e).decode()
+                  for e in handle['PIV'].attrs['MATLAB_fields']]
+    missing = [n for n in ('U_QO', 'U_QOIR', 'z_QOIR', 'U_QOIRPIV') if n not in listed]
+    if missing:
+        raise SystemExit('MATLAB_fields does not list ' + ', '.join(missing) +
+                         ' -- MATLAB would not see them. Restore from ' + str(backup))
+    print('PIV now lists %d fields to MATLAB: %s' % (len(listed), ', '.join(listed)))
 
 
 if __name__ == '__main__':
