@@ -1,6 +1,6 @@
 # QuadraticOptical
 
-[Local landing page](docs/index.html) · [Method PDF](docs/files/image_only_method.pdf) · [Research archive guide](research/README.md)
+[Local landing page](docs/index.html) · [How it works, step by step](docs/how-it-works.md) · [Method PDF](docs/files/image_only_method.pdf) · [Research archive guide](research/README.md)
 
 QuadraticOptical estimates a two-component velocity field from particle images near a free surface. It combines automatic particle tracking with robust local quadratic image registration, then reports conservative velocity coverage, Cartesian `du/dx` and `dw/dz`, and horizontal integrals at depths below the **local** surface. The default requested depth is 1 cm across the image width.
 
@@ -147,7 +147,7 @@ python -m quadratic_optical run images --output analysis --config examples/metad
 python -m quadratic_optical compare analysis/ExpLCL_1_03_80 --piv images/ExpLCL_1_03_80_PIV.mat --ir-results path/to/results.mat --experiment ExpLCL_1_03 --pair-number 80
 ```
 
-`results.mat` is optional and its location is supplied by the caller. **No raw IR directory is assumed, searched or required.** The reader selects the named experiment and matches the stored pair label to `PIV.IR_idx`. It prefers a finite indexed `USurf.usurf0`; if that is missing, it can display finite indexed `USurf.usurffilt`, explicitly labelled a smoothed estimate. It records timing and missing-data details and never substitutes a theoretical velocity or neighboring raw time. See [data-format.md](docs/data-format.md#optional-ir-results).
+`results.mat` is optional and its location is supplied by the caller. **No raw IR directory is assumed, searched or required.** The reader selects the named experiment and matches the stored pair label to `PIV.IR_idx`. It prefers a finite indexed `USurf.usurffilt`, labelled a smoothed estimate; if that is missing it falls back to a finite indexed `USurf.usurf0`, labelled a raw fresh-dot observation. The filtered series is preferred because each raw value rests on one to three dots and scatters by about 0.037 m/s against the filtered trace while differing from it by 0.0004 m/s on average -- unbiased, but too noisy to use as a single-pair reference. Both values are recorded either way, so the rejected one stays visible. It records timing and missing-data details and never substitutes a theoretical velocity or neighboring raw time. See [data-format.md](docs/data-format.md#optional-ir-results).
 
 The exact selection is stored in `surface_ir_reference.json`. Later report/comparison commands retain this record when `--ir-results` is omitted; an explicitly selected new record replaces it. Only finite, indexed raw/filtered observational fields marked comparison-only are accepted for a star at zero depth. An unavailable selection remains a recorded reason, without a fabricated star.
 

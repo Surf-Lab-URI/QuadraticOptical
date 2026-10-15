@@ -2,6 +2,9 @@
 
 QuadraticOptical is a custom image-registration workflow for particle images with a supplied free-surface geometry. It preserves the conservative local quadratic model and records where the image evidence does not support a reportable result. It is not an implementation of a trained GOFLOW/U-Net model, wavelet optical flow, a global fluid solver or a reflection-object classifier.
 
+For a plain-language walkthrough of the order of operations, see
+[how-it-works.md](how-it-works.md).
+
 See also the [method PDF](files/image_only_method.pdf), its [LaTeX source](files/image_only_method.tex), and the [research archive guide](../research/README.md). The 174 archived Python scripts are historical records; the supported implementation is `src/quadratic_optical/`.
 
 ## What enters prediction
