@@ -22,8 +22,11 @@ SURFACE_MARGIN_PX = 24.     # headroom above the highest surface point, for wave
 PIV_STRIDE = 4              # native PIV is 4 px; decimate before embedding
 
 # Report figures, in reading order, appended below the interactive canvas.
-FIGURE_ORDER = ['quiver', 'gradient_comparison', 'gradients', 'profiles', 'manual_comparison',
+FIGURE_ORDER = ['quiver', 'gradient_comparison', 'gradients', 'profiles',
+                # research/fit_order comparisons, when a pair has them, beside what they compare
+                'fitorder_profiles', 'manual_comparison',
                 'field_u', 'field_u_z', 'field_w', 'field_w_z',
+                'fitorder_delta_u_z', 'fitorder_delta_w_z',
                 'field_u_smooth40px', 'field_u_smooth40px_z',
                 'field_w_smooth40px', 'field_w_smooth40px_z',
                 'field_dudx_from_smooth40px', 'field_dudx_from_smooth40px_z']
